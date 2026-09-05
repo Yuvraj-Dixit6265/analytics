@@ -390,26 +390,76 @@ function PublicBoxBody({ box }) {
   }
 
   if (box.kind === "chart") {
-    
+  let data = [];
 
-    const data = result?.data || [];
+  /*
+   * VALUE BOX SOURCE
+   *
+   * Build chart data from the Value boxes selected
+   * in the chart configuration.
+   */
+  if (box.chart?.source === "value_boxes") {
+    const selected = box.chart?.valueBoxes || [];
 
-    if (!data.length) {
-      return (
-        <div className="ph">
-          <b>No data</b>
-        </div>
-      );
-    }
+    const allValueBoxes = state.doc.sections
+      .flatMap((section) => section.boxes || []);
 
+    data = selected
+      .map((id) => {
+        const valueBox = allValueBoxes.find(
+          (b) => b.id === id
+        );
+
+        if (!valueBox) return null;
+
+        const valueResult = state.results[valueBox.id];
+
+        let value;
+
+        /*
+         * Manual value
+         */
+        if (valueBox.value?.source === "manual") {
+          value = Number(valueBox.value.manual);
+        } else {
+          value = Number(valueResult?.value);
+        }
+
+        if (!Number.isFinite(value)) {
+          value = 0;
+        }
+
+        return {
+          label: valueBox.title || "Unnamed value",
+          value,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  /*
+   * NORMAL DATABASE CHART
+   */
+  else {
+    data = result?.data || [];
+  }
+
+  if (!data.length) {
     return (
-      <div className="chartwrap">
-        <div className="chartsvg">
-          <Chart data={data} cfg={box.chart} />
-        </div>
+      <div className="ph">
+        <b>No data</b>
       </div>
     );
   }
+
+  return (
+    <div className="chartwrap">
+      <div className="chartsvg">
+        <Chart data={data} cfg={box.chart} />
+      </div>
+    </div>
+  );
+}
 
   // Manual Table: data is stored directly in the box definition,
   // so it does not come from state.results.

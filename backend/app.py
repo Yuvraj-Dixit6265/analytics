@@ -280,6 +280,63 @@ def _catalogue(conn_row):
 def _run_box(box, definition, state, conn_row, cat, role_row, values):
     """Return the finished payload for one box."""
     kind = box.get("kind")
+        # ------------------------------------------------------------
+    # CHART FROM EXISTING VALUE BOXES
+    # ------------------------------------------------------------
+    if kind == "chart":
+        chart = box.get("chart") or {}
+
+        if chart.get("source") == "value_boxes":
+            selected_ids = chart.get("valueBoxes") or []
+
+            if not selected_ids:
+                return {"data": []}
+
+            all_boxes = [
+                b
+                for sec in definition.get("sections", [])
+                for b in sec.get("boxes", [])
+            ]
+
+            boxes_by_id = {
+                b.get("id"): b
+                for b in all_boxes
+            }
+
+            data = []
+
+            for box_id in selected_ids:
+                value_box = boxes_by_id.get(box_id)
+
+                if not value_box:
+                    continue
+
+                if value_box.get("kind") != "value":
+                    continue
+
+                value = values.get(box_id)
+
+                if value is None:
+                    title = value_box.get("title") or ""
+                    value = values.get(title)
+
+                if value is None:
+                    value_cfg = value_box.get("value") or {}
+
+                    if value_cfg.get("source") == "manual":
+                        value = value_cfg.get("manual")
+
+                try:
+                    numeric_value = float(value)
+                except (TypeError, ValueError):
+                    continue
+
+                data.append({
+                    "label": value_box.get("title") or "Unnamed value",
+                    "value": numeric_value,
+                })
+
+            return {"data": data}
     if kind == "note":
         return None
 
@@ -348,6 +405,14 @@ def _execute_boxes(definition, state, conn_row, cat, allow_forms=True):
         if payload is None:
             continue
         results[box["id"]] = payload
+                # Make Value-box results available to other boxes by ID.
+        if box.get("kind") == "value" and "value" in payload:
+            values[box["id"]] = payload["value"]
+
+            # Keep title references too because formulas already use titles.
+            title = box.get("title")
+            if title:
+                values[title] = payload["value"]
         if box.get("kind") == "value":
             v = payload.get("value")
             try:

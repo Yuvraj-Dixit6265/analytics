@@ -97,7 +97,7 @@ export default function Canvas() {
     <ReportName />
     <FilterBar />
 
-    <SectionNav />
+    <SectionNavigation />
 
     {state.doc.sections.map((sc, i) => (
       <Section key={sc.id} section={sc} index={i + 1} />
@@ -224,7 +224,7 @@ function SectionNavigation() {
   if (!sections.length) return null;
 
   const scrollToSection = (id) => {
-    const el = document.getElementById(`report-section-${id}`);
+    const el = document.getElementById(`section-${id}`);
 
     if (el) {
       el.scrollIntoView({
@@ -615,7 +615,9 @@ function Section({ section: sc, index }) {
   };
 
   return (
-    <div className={`sec${sc.frame?.on ? " framed" : ""}${selected ? " sel" : ""}`}
+    <div
+      id={`section-${sc.id}`}
+      className={`sec${sc.frame?.on ? " framed" : ""}${selected ? " sel" : ""}`}
       style={frameStyle(sc.frame)}
       onMouseDown={(e) => {
         if (!design) return;

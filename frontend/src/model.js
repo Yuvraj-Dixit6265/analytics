@@ -68,6 +68,13 @@ export const blankDoc = () => ({
   name: "New Report / Dashboard",
   numberFormat: "en-IN",
   nameStyle: S({ size: 24, bold: true }),
+
+  organisationSettings: {
+    companyCode: "",
+    plant: "",
+    period: "",
+  },
+
   filters: [],
   sections: [],
 });
@@ -208,6 +215,10 @@ export function applyDefaults(b, catalog) {
 /* ---------------- migration ---------------- */
 export function migrate(d) {
   const doc = { ...blankDoc(), ...(d || {}) };
+  doc.organisationSettings = {
+    ...blankDoc().organisationSettings,
+    ...(d?.organisationSettings || {}),
+  };
   if (d && d.heading && d.heading.title && (!d.name || d.name === "Untitled report"))
     doc.name = d.heading.title;
   delete doc.heading;

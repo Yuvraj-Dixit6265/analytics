@@ -25,13 +25,15 @@ async function getPublishedReport(slug) {
   return data;
 }
 
-async function executePublished(slug, definition) {
+async function executePublished(slug, definition, filters = {}) {
   const res = await fetch(`${API_BASE}/r/${encodeURIComponent(slug)}/execute`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({}),
+    body: JSON.stringify({
+  filters,
+}),
   });
 
   const text = await res.text();
@@ -229,7 +231,10 @@ function PublicSection({ section, index }) {
   };
 
   return (
-  <div className="sec">
+  <div
+  className="sec"
+  id={`section-${section.id}`}
+  >
       {nameVisible && (
         <>
           <div

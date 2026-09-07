@@ -404,3 +404,55 @@ body.preview .help{display:none}
     page-break-inside: avoid !important;
   }
 }
+/* Organisation settings */
+
+.org-settings {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+
+.org-title {
+  font-weight: 700;
+  margin-right: 8px;
+}
+
+.org-settings select {
+  min-width: 130px;
+  padding: 7px 10px;
+}
+
+
+/* Section navigation */
+
+.section-nav {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 10px 0 14px;
+  margin-bottom: 18px;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--paper, #fff);
+  border-bottom: 1px solid var(--line, #ddd);
+}
+
+.section-nav-item {
+  border: 1px solid var(--line, #ddd);
+  background: #fff;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.section-nav-item:hover {
+  background: #f5f5f5;
+}

@@ -58,16 +58,50 @@ function Editable({
     />
   );
 }
+function SectionNav() {
+  const { state } = useStore();
+
+  if (!state.doc.sections?.length) return null;
+
+  const scrollToSection = (id) => {
+    const el = document.getElementById(`section-${id}`);
+    if (el) {
+      el.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  };
+
+  return (
+    <div className="section-nav">
+      {state.doc.sections.map((section) => (
+        <button
+          key={section.id}
+          type="button"
+          className="section-nav-item"
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => scrollToSection(section.id)}
+        >
+          {section.name || "Untitled Section"}
+        </button>
+      ))}
+    </div>
+  );
+}
 export default function Canvas() {
   const { state, dispatch } = useStore();
   const design = state.mode === "design";
   return (
-    <div className="sheet" onMouseDown={() => dispatch({ type: "select", sel: null })}>
-      <ReportName />
-      <FilterBar />
-      {state.doc.sections.map((sc, i) => (
-        <Section key={sc.id} section={sc} index={i + 1} />
-      ))}
+  <div className="sheet" onMouseDown={() => dispatch({ type: "select", sel: null })}>
+    <ReportName />
+    <FilterBar />
+
+    <SectionNav />
+
+    {state.doc.sections.map((sc, i) => (
+      <Section key={sc.id} section={sc} index={i + 1} />
+    ))}
       {design && (
         <div className="addbar">
           <button className="add big" onClick={() => dispatch({ type: "addSection" })}>
@@ -133,6 +167,87 @@ function ReportName() {
 }
 
 /* ---------------- filters ---------------- */
+function OrganisationSettings() {
+  const { state, dispatch } = useStore();
+
+  const settings = state.doc.organisationSettings || {};
+
+  const set = (key, value) =>
+    dispatch({
+      type: "setDoc",
+      path: `organisationSettings.${key}`,
+      value,
+    });
+
+  return (
+    <div className="org-settings">
+      <div className="org-title">
+        Organisation Settings
+      </div>
+
+      <select
+        value={settings.companyCode || ""}
+        onChange={(e) => set("companyCode", e.target.value)}
+      >
+        <option value="">Company Code</option>
+        <option value="1000">1000</option>
+        <option value="2000">2000</option>
+      </select>
+
+      <select
+        value={settings.plant || ""}
+        onChange={(e) => set("plant", e.target.value)}
+      >
+        <option value="">Plant</option>
+        <option value="1100">1100</option>
+        <option value="1200">1200</option>
+      </select>
+
+      <select
+        value={settings.period || ""}
+        onChange={(e) => set("period", e.target.value)}
+      >
+        <option value="">Period</option>
+        <option value="2026">2026</option>
+        <option value="2025">2025</option>
+      </select>
+    </div>
+  );
+}
+
+function SectionNavigation() {
+  const { state } = useStore();
+
+  const sections = (state.doc.sections || [])
+    .filter((section) => section.visible !== false);
+
+  if (!sections.length) return null;
+
+  const scrollToSection = (id) => {
+    const el = document.getElementById(`report-section-${id}`);
+
+    if (el) {
+      el.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  };
+
+  return (
+    <div className="section-nav">
+      {sections.map((section) => (
+        <button
+          key={section.id}
+          type="button"
+          onClick={() => scrollToSection(section.id)}
+        >
+          {section.name || "Untitled Section"}
+        </button>
+      ))}
+    </div>
+  );
+}
 function FilterBar() {
   const { state, dispatch } = useStore();
   const design = state.mode === "design";

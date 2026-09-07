@@ -65,10 +65,13 @@ function SectionNav() {
 
   const scrollToSection = (id) => {
     const el = document.getElementById(`section-${id}`);
+
     if (el) {
-      el.scrollIntoView({
+      const y = el.getBoundingClientRect().top + window.scrollY - 80;
+
+      window.scrollTo({
+        top: y,
         behavior: "smooth",
-        block: "start",
       });
     }
   };

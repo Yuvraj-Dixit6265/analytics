@@ -195,7 +195,33 @@ function PublicCanvas({ doc }) {
           {doc.name}
         </div>
       </div>
+      {doc.sections?.length > 0 && (
+        <div className="section-nav">
+          {doc.sections
+            .filter((section) => section.visible !== false)
+            .map((section) => (
+              <button
+                key={section.id}
+                type="button"
+                className="section-nav-item"
+                onClick={() => {
+                  const el = document.getElementById(`section-${section.id}`);
 
+                  if (el) {
+                    const y = el.getBoundingClientRect().top + window.scrollY - 80;
+
+                    window.scrollTo({
+                      top: y,
+                      behavior: "smooth",
+                    });
+                  }
+                }}
+              >
+                {section.name || "Untitled Section"}
+              </button>
+            ))}
+        </div>
+      )}
       {doc.sections.map((section, index) => (
         <PublicSection
           key={section.id}

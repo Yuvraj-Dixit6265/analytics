@@ -1,211 +1,261 @@
 """exporters.py — turn one report's computed results into a PDF, a PPTX, or
-an XLSX. All three read the exact same normalized structure (see
-`app.py:_render_boxes`), so a box that's wrong in one format is wrong (and
-fixable) in exactly one place, not three.
+an XLSX. Two very different kinds of PDF live here:
+
+  - build_browser_pdf(url)   — a pixel-accurate capture of the dashboard as
+    it actually renders, taken with headless Chromium. Same numbers, same
+    boxes, same colours as the live page, because it IS the live page.
+    Needs a real URL to visit (the published link), so it only works for
+    reports that are actually published.
+
+  - build_table_pdf(name, sections) — a plain, print-friendly listing built
+    from computed values, no browser involved. Used for the separate
+    "Table" export, and as the editor's own PDF until that also gets a
+    browser-backed version.
+
+PPTX and XLSX both build from the same normalized `sections` structure (see
+app.py:_render_boxes), so a box that's wrong in one format is wrong — and
+fixable — in exactly one place.
 """
 
-import os
 import io
+import os
 import re
-from pptx.enum.shapes import MSO_SHAPE
 
 
 # --------------------------------------------------------------------------
-# BROWSER PDF
-# --------------------------------------------------------------------------
-
-# --------------------------------------------------------------------------
-# PDF
+# BROWSER PDF — a screenshot of the real page, with clickable section links
 # --------------------------------------------------------------------------
 def build_browser_pdf(url):
-    """
-    Generate a PDF from the actual rendered published React report.
-
-    The dashboard is rendered using normal screen CSS so the grid,
-    box sizes and alignment remain identical to the published page.
-
-    The rendered dashboard is captured at high resolution and then
-    placed into an A4 PDF at 300 DPI for sharp text and charts.
-    """
-
-    from playwright.sync_api import sync_playwright
+    """Render the published page in headless Chromium, capture it, split it
+    into A4 pages, and add invisible clickable links over the on-page
+    section-navigation buttons so each one jumps to its section in the PDF.
+    The visual result is the dashboard itself — nothing is redrawn."""
     from PIL import Image
-    import io
+    from playwright.sync_api import sync_playwright
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import (
+        ArrayObject, DictionaryObject, FloatObject, NameObject, NullObject,
+        NumberObject,
+    )
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-            ],
+            args=["--no-sandbox", "--disable-setuid-sandbox"],
         )
-
-        # Keep the same desktop layout as the published dashboard.
-        # Higher device scale factor = higher resolution screenshot.
         page = browser.new_page(
-            viewport={
-                "width": 1440,
-                "height": 900,
-            },
+            viewport={"width": 1440, "height": 900},
             device_scale_factor=3,
         )
 
-        response = page.goto(
-            url,
-            wait_until="networkidle",
-        )
-
+        response = page.goto(url, wait_until="networkidle")
         print("PDF BROWSER URL:", url)
-        print(
-            "PDF PAGE STATUS:",
-            response.status if response else None
-        )
+        print("PDF PAGE STATUS:", response.status if response else None)
         print("PDF PAGE URL:", page.url)
 
-        page.wait_for_selector(
-            ".sheet",
-            timeout=30000,
-        )
-
-        # Wait for React/charts/fonts.
+        page.wait_for_selector(".sheet", timeout=30000)
         page.wait_for_timeout(1500)
+        page.evaluate("""
+            async () => { if (document.fonts) { await document.fonts.ready; } }
+        """)
 
-        page.evaluate(
-            """
-            async () => {
-                if (document.fonts) {
-                    await document.fonts.ready;
-                }
-            }
-            """
-        )
-
-        # Hide download buttons only.
-        page.add_style_tag(
-            content="""
-                .export-actions {
-                    display: none !important;
-                }
-            """
-        )
-
-        # --------------------------------------------------------------
-        # Capture the EXACT rendered dashboard.
-        # --------------------------------------------------------------
+        # Hide the download buttons themselves — they shouldn't appear
+        # inside the exported file.
+        page.add_style_tag(content=".export-actions { display: none !important; }")
 
         sheet = page.locator(".sheet")
-
-        dimensions = sheet.evaluate(
-            """
+        dimensions = sheet.evaluate("""
             el => {
                 const r = el.getBoundingClientRect();
-
-                return {
-                    x: r.x,
-                    y: r.y,
-                    width: r.width,
-                    height: r.height
-                };
+                return { x: r.x, y: r.y, width: r.width, height: r.height };
             }
-            """
-        )
-
+        """)
         print("PDF SHEET CSS DIMENSIONS:", dimensions)
 
-        screenshot = sheet.screenshot(
-            type="png",
-            animations="disabled",
-        )
+        # ------------------------------------------------------------
+        # Section navigation button positions — become invisible
+        # clickable areas in the final PDF.
+        # ------------------------------------------------------------
+        section_links = sheet.evaluate("""
+            sheet => {
+                const buttons = Array.from(sheet.querySelectorAll(".section-nav button"));
+                const sections = Array.from(
+                    sheet.querySelectorAll('.sec[id^="section-"]')
+                ).filter(el => el.offsetParent !== null);
+                const sr = sheet.getBoundingClientRect();
+                return buttons.map((button, index) => {
+                    const target = sections[index];
+                    if (!target) return null;
+                    const br = button.getBoundingClientRect();
+                    const tr = target.getBoundingClientRect();
+                    return {
+                        text: (button.textContent || "").trim() || "Untitled Section",
+                        button: {
+                            x: br.left - sr.left, y: br.top - sr.top,
+                            width: br.width, height: br.height,
+                        },
+                        targetY: tr.top - sr.top,
+                    };
+                }).filter(Boolean);
+            }
+        """)
+        print("PDF SECTION LINKS:", section_links)
+        print("PDF SECTION LINK COUNT:", len(section_links))
+        if not section_links:
+            print("NOTE: no section-nav buttons found — the PDF will still "
+                  "render, just without in-PDF jump links.")
+            print("BUTTON COUNT:", sheet.locator(".section-nav button").count())
+            print("SECTION COUNT:", sheet.locator('.sec[id^="section-"]').count())
 
-        # Close browser only after screenshot is captured.
+        screenshot = sheet.screenshot(type="png", animations="disabled")
+        device_scale_factor = page.evaluate("() => window.devicePixelRatio")
+        print("DEVICE SCALE FACTOR:", device_scale_factor)
         browser.close()
 
-    # --------------------------------------------------------------
-    # Convert screenshot to high-resolution A4 pages.
-    #
-    # A4 @ 300 DPI:
-    #   8.27in × 300 = 2480 px
-    #   11.69in × 300 = 3508 px
-    # --------------------------------------------------------------
-
-    image = Image.open(
-        io.BytesIO(screenshot)
-    ).convert("RGB")
-
+    # ------------------------------------------------------------------
+    # Convert the screenshot into A4-sized pages
+    # ------------------------------------------------------------------
+    image = Image.open(io.BytesIO(screenshot)).convert("RGB")
     print("PDF SCREENSHOT PIXELS:", image.size)
 
     A4_WIDTH = 2480
     A4_HEIGHT = 3508
-
-    # Preserve exact aspect ratio.
     scale = A4_WIDTH / image.width
-
     scaled_width = A4_WIDTH
     scaled_height = round(image.height * scale)
-
-    image = image.resize(
-        (scaled_width, scaled_height),
-        Image.Resampling.LANCZOS,
-    )
-
-    print(
-        "PDF SCALED IMAGE:",
-        image.size
-    )
-
-    # --------------------------------------------------------------
-    # Split dashboard into A4 pages.
-    # --------------------------------------------------------------
+    image = image.resize((scaled_width, scaled_height), Image.Resampling.LANCZOS)
+    print("PDF SCALED IMAGE:", image.size)
 
     pages = []
-
     for top in range(0, scaled_height, A4_HEIGHT):
-
-        bottom = min(
-            top + A4_HEIGHT,
-            scaled_height,
-        )
-
-        page_image = Image.new(
-            "RGB",
-            (A4_WIDTH, A4_HEIGHT),
-            "white",
-        )
-
-        crop = image.crop(
-            (
-                0,
-                top,
-                scaled_width,
-                bottom,
-            )
-        )
-
-        page_image.paste(
-            crop,
-            (0, 0),
-        )
-
+        bottom = min(top + A4_HEIGHT, scaled_height)
+        page_image = Image.new("RGB", (A4_WIDTH, A4_HEIGHT), "white")
+        crop = image.crop((0, top, scaled_width, bottom))
+        page_image.paste(crop, (0, 0))
         pages.append(page_image)
 
-    # --------------------------------------------------------------
-    # Generate PDF at 300 DPI.
-    # --------------------------------------------------------------
-
     output = io.BytesIO()
+    pages[0].save(output, format="PDF", resolution=300.0, save_all=True,
+                  append_images=pages[1:])
+    pdf_bytes = output.getvalue()
 
-    pages[0].save(
-        output,
-        format="PDF",
-        resolution=300.0,
-        save_all=True,
-        append_images=pages[1:],
-    )
+    # ------------------------------------------------------------------
+    # Add invisible internal PDF links over each section-nav button
+    # ------------------------------------------------------------------
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    writer = PdfWriter()
+    for pdf_page in reader.pages:
+        writer.add_page(pdf_page)
 
-    return output.getvalue()
+    A4_WIDTH_PT = 595.28
+    A4_HEIGHT_PT = 841.89
+    FINAL_WIDTH_PX = pages[0].width
+    FINAL_HEIGHT_PX = pages[0].height
+    print("FINAL IMAGE DIMENSIONS:", FINAL_WIDTH_PX, "x", FINAL_HEIGHT_PX)
+
+    PX_TO_PT_X = A4_WIDTH_PT / FINAL_WIDTH_PX
+    PX_TO_PT_Y = A4_HEIGHT_PT / FINAL_HEIGHT_PX
+
+    css_to_screenshot = float(device_scale_factor)
+    css_to_final = scale * css_to_screenshot
+    print("CSS TO FINAL:", css_to_final)
+
+    print("\n=== SECTION LINKS DEBUG ===")
+    for i, link in enumerate(section_links):
+        print(i + 1, "| button:", link.get("button"), "| targetY:", link.get("targetY"))
+    print("===========================\n")
+
+    for link in section_links:
+        button = link["button"]
+        target_y_css = link["targetY"]
+
+        button_x1_px = button["x"] * css_to_final
+        button_x2_px = (button["x"] + button["width"]) * css_to_final
+        button_top_px = button["y"] * css_to_final
+        button_bottom_px = (button["y"] + button["height"]) * css_to_final
+        target_y_px = target_y_css * css_to_final
+
+        target_page_index = int(target_y_px // FINAL_HEIGHT_PX)
+        target_page_index = max(0, min(target_page_index, len(writer.pages) - 1))
+
+        button_page_index = int(button_top_px // FINAL_HEIGHT_PX)
+        if button_page_index < 0 or button_page_index >= len(writer.pages):
+            continue
+
+        button_page_top_px = button_page_index * FINAL_HEIGHT_PX
+        button_top_page_px = button_top_px - button_page_top_px
+        button_bottom_page_px = button_bottom_px - button_page_top_px
+
+        button_x1_pt = button_x1_px * PX_TO_PT_X
+        button_x2_pt = button_x2_px * PX_TO_PT_X
+        button_y1_pt = A4_HEIGHT_PT - (button_bottom_page_px * PX_TO_PT_Y)
+        button_y2_pt = A4_HEIGHT_PT - (button_top_page_px * PX_TO_PT_Y)
+
+        button_x1_pt = max(0.0, min(A4_WIDTH_PT, button_x1_pt))
+        button_x2_pt = max(0.0, min(A4_WIDTH_PT, button_x2_pt))
+        button_y1_pt = max(0.0, min(A4_HEIGHT_PT, button_y1_pt))
+        button_y2_pt = max(0.0, min(A4_HEIGHT_PT, button_y2_pt))
+
+        target_page_top_px = target_page_index * FINAL_HEIGHT_PX
+        target_y_page_px = target_y_px - target_page_top_px
+        target_y_pt = A4_HEIGHT_PT - (target_y_page_px * PX_TO_PT_Y)
+        target_y_pt = max(0.0, min(A4_HEIGHT_PT, target_y_pt))
+
+        print(
+            "Creating link:",
+            "| button page =", button_page_index + 1,
+            "| target page =", target_page_index + 1,
+            "| rect =", (round(button_x1_pt, 2), round(button_y1_pt, 2),
+                         round(button_x2_pt, 2), round(button_y2_pt, 2)),
+            "| targetY =", round(target_y_pt, 2),
+        )
+
+        annotation = DictionaryObject()
+        annotation.update({
+            NameObject("/Type"): NameObject("/Annot"),
+            NameObject("/Subtype"): NameObject("/Link"),
+            NameObject("/Rect"): ArrayObject([
+                FloatObject(button_x1_pt), FloatObject(button_y1_pt),
+                FloatObject(button_x2_pt), FloatObject(button_y2_pt),
+            ]),
+            NameObject("/Border"): ArrayObject([
+                NumberObject(0), NumberObject(0), NumberObject(0),
+            ]),
+            NameObject("/A"): DictionaryObject({
+                NameObject("/S"): NameObject("/GoTo"),
+                NameObject("/D"): ArrayObject([
+                    writer.pages[target_page_index].indirect_reference,
+                    NameObject("/XYZ"), NullObject(),
+                    FloatObject(target_y_pt), NullObject(),
+                ]),
+            }),
+        })
+
+        annotation_ref = writer._add_object(annotation)
+        pdf_page_obj = writer.pages[button_page_index]
+        if "/Annots" not in pdf_page_obj:
+            pdf_page_obj[NameObject("/Annots")] = ArrayObject()
+        pdf_page_obj[NameObject("/Annots")].append(annotation_ref)
+
+    print("\n=== VERIFYING PDF ANNOTATIONS ===")
+    total_annotations = 0
+    for i, pg in enumerate(writer.pages):
+        annots = pg.get("/Annots")
+        count = len(annots) if annots else 0
+        total_annotations += count
+        print("PAGE", i + 1, "ANNOTATIONS:", count)
+    print("TOTAL PDF ANNOTATIONS:", total_annotations)
+
+    final_output = io.BytesIO()
+    writer.write(final_output)
+    final_pdf = final_output.getvalue()
+    print("\nFINAL PDF SIZE:", len(final_pdf))
+    return final_pdf
 
 
+# --------------------------------------------------------------------------
+# shared small helpers
+# --------------------------------------------------------------------------
 def _esc(s):
     return (str(s) if s is not None else "").replace("&", "&amp;") \
         .replace("<", "&lt;").replace(">", "&gt;")
@@ -221,6 +271,7 @@ def _cell(v):
 def build_pptx(name, sections):
     from pptx import Presentation
     from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
     from pptx.util import Inches, Pt
 
     prs = Presentation()
@@ -256,39 +307,26 @@ def build_pptx(name, sections):
                 continue
 
             if box["kind"] == "value":
-
                 card = slide.shapes.add_shape(
-                    MSO_SHAPE.ROUNDED_RECTANGLE,
-                    Inches(0.5),
-                    Inches(y),
-                    Inches(5.8),
-                    Inches(1.5),
-                )
-
-                # Card background
+                    MSO_SHAPE.ROUNDED_RECTANGLE, Inches(0.5), Inches(y), Inches(5.8), Inches(1.5))
                 card.fill.solid()
                 card.fill.fore_color.rgb = RGBColor(255, 255, 255)
-
-                # Card border
                 card.line.color.rgb = RGBColor(213, 221, 218)
 
                 tf = card.text_frame
                 tf.clear()
                 tf.word_wrap = True
 
-                # Title
                 p1 = tf.paragraphs[0]
                 p1.text = box["title"] or ""
                 p1.font.size = Pt(12)
                 p1.font.color.rgb = RGBColor(0x5A, 0x66, 0x63)
 
-                # Main value
                 p2 = tf.add_paragraph()
                 p2.text = box.get("text", "—")
                 p2.font.size = Pt(30)
                 p2.font.bold = True
 
-                # Optional note
                 if box.get("note"):
                     p3 = tf.add_paragraph()
                     p3.text = box["note"]
@@ -298,7 +336,7 @@ def build_pptx(name, sections):
                 y += 1.7
 
             elif box["kind"] in ("chart", "table") and box.get("rows"):
-                rows = box["rows"][:13]  # keep one slide readable
+                rows = box["rows"][:13]
                 r, c = len(rows), max(len(x) for x in rows)
                 label = slide.shapes.add_textbox(Inches(0.5), Inches(y), Inches(6), Inches(0.4))
                 label.text_frame.text = box["title"] or ""
@@ -371,8 +409,8 @@ def build_xlsx(name, sections):
             elif box.get("text"):
                 ws.cell(row=row, column=1, value=box["text"])
                 row += 2
-        for col in range(1, 9):
-            ws.column_dimensions[chr(64 + col)].width = 22
+        for col_idx in range(1, 9):
+            ws.column_dimensions[chr(64 + col_idx)].width = 22
 
     if not wb.sheetnames:
         wb.create_sheet("Report")
@@ -381,50 +419,43 @@ def build_xlsx(name, sections):
     wb.save(buf)
     return buf.getvalue()
 
+
 # --------------------------------------------------------------------------
-# CSV / TABLE
+# CSV
 # --------------------------------------------------------------------------
 def build_csv(name, sections):
     import csv
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-
     writer.writerow([name])
 
     for sec in sections:
         writer.writerow([])
         writer.writerow([sec["name"]])
-
         if sec.get("desc"):
             writer.writerow([sec["desc"]])
 
         for box in sec["boxes"]:
             writer.writerow([])
             writer.writerow([box["title"] or "Untitled"])
-
             if box.get("error"):
                 writer.writerow(["Error", box["error"]])
-
             elif box["kind"] == "value":
                 writer.writerow(["Value", box.get("text", "—")])
-
                 if box.get("note"):
                     writer.writerow(["Note", box["note"]])
-
             elif box["kind"] in ("chart", "table") and box.get("rows"):
                 for row in box["rows"]:
-                    writer.writerow([
-                        "—" if value is None else value
-                        for value in row
-                    ])
-
+                    writer.writerow(["—" if v is None else v for v in row])
             elif box.get("text"):
                 writer.writerow([box["text"]])
 
     return buf.getvalue().encode("utf-8")
+
+
 # --------------------------------------------------------------------------
-# TABLE PDF
+# TABLE PDF — a plain, print-friendly listing (no browser involved)
 # --------------------------------------------------------------------------
 def build_table_pdf(name, sections):
     from reportlab.lib import colors
@@ -432,269 +463,92 @@ def build_table_pdf(name, sections):
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
     from reportlab.platypus import (
-        Paragraph,
-        SimpleDocTemplate,
-        Spacer,
-        Table,
-        TableStyle,
-        PageBreak,
+        Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
     )
 
     buf = io.BytesIO()
-
-    doc = SimpleDocTemplate(
-        buf,
-        pagesize=landscape(A4),
-        topMargin=36,
-        bottomMargin=36,
-        leftMargin=36,
-        rightMargin=36,
-    )
-
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=36, bottomMargin=36,
+                             leftMargin=36, rightMargin=36)
     styles = getSampleStyleSheet()
 
-    title_style = ParagraphStyle(
-        "TableReportTitle",
-        parent=styles["Title"],
-        fontSize=20,
-        spaceAfter=20,
-    )
+    title_style = ParagraphStyle("TableReportTitle", parent=styles["Title"],
+                                  fontSize=20, spaceAfter=20)
+    section_style = ParagraphStyle("TableSection", parent=styles["Heading2"],
+                                    fontSize=14, spaceBefore=14, spaceAfter=8)
+    header_style = ParagraphStyle("TableHeader", parent=styles["BodyText"],
+                                   fontSize=9, fontName="Helvetica-Bold", textColor=colors.white)
+    cell_style = ParagraphStyle("TableCell", parent=styles["BodyText"], fontSize=9, leading=12)
 
-    section_style = ParagraphStyle(
-        "TableSection",
-        parent=styles["Heading2"],
-        fontSize=14,
-        spaceBefore=14,
-        spaceAfter=8,
-    )
-
-    header_style = ParagraphStyle(
-        "TableHeader",
-        parent=styles["BodyText"],
-        fontSize=9,
-        fontName="Helvetica-Bold",
-        textColor=colors.white,
-    )
-
-    cell_style = ParagraphStyle(
-        "TableCell",
-        parent=styles["BodyText"],
-        fontSize=9,
-        leading=12,
-    )
-
-    story = [
-        Paragraph(_esc(name), title_style),
-    ]
+    story = [Paragraph(_esc(name), title_style)]
 
     for sec in sections:
-
-        # Section heading
-        story.append(
-            Paragraph(
-                _esc(sec.get("name", "Untitled Section")),
-                section_style,
-            )
-        )
-
+        story.append(Paragraph(_esc(sec.get("name", "Untitled Section")), section_style))
         if sec.get("desc"):
-            story.append(
-                Paragraph(
-                    _esc(sec["desc"]),
-                    cell_style,
-                )
-            )
+            story.append(Paragraph(_esc(sec["desc"]), cell_style))
             story.append(Spacer(1, 8))
 
-        # Main table header
-        table_data = [
-            [
-                Paragraph("Metric", header_style),
-                Paragraph("Value", header_style),
-                Paragraph("Note / Details", header_style),
-            ]
-        ]
+        table_data = [[
+            Paragraph("Metric", header_style),
+            Paragraph("Value", header_style),
+            Paragraph("Note / Details", header_style),
+        ]]
 
         for box in sec.get("boxes", []):
-
-            # Error boxes
             if box.get("error"):
                 table_data.append([
                     Paragraph(_esc(box.get("title") or "Error"), cell_style),
                     Paragraph("Error", cell_style),
                     Paragraph(_esc(box["error"]), cell_style),
                 ])
-
-            # Value / KPI boxes
             elif box.get("kind") == "value":
                 table_data.append([
-                    Paragraph(
-                        _esc(box.get("title") or "Untitled"),
-                        cell_style,
-                    ),
-                    Paragraph(
-                        _esc(box.get("text", "—")),
-                        cell_style,
-                    ),
-                    Paragraph(
-                        _esc(box.get("note", "")),
-                        cell_style,
-                    ),
+                    Paragraph(_esc(box.get("title") or "Untitled"), cell_style),
+                    Paragraph(_esc(box.get("text", "—")), cell_style),
+                    Paragraph(_esc(box.get("note", "")), cell_style),
                 ])
-
-            # Chart or table boxes
-            elif (
-                box.get("kind") in ("chart", "table")
-                and box.get("rows")
-            ):
+            elif box.get("kind") in ("chart", "table") and box.get("rows"):
                 rows = box["rows"]
-
-                # Add the box title
                 table_data.append([
-                    Paragraph(
-                        f"<b>{_esc(box.get('title') or 'Table')}</b>",
-                        cell_style,
-                    ),
-                    "",
-                    "",
+                    Paragraph(f"<b>{_esc(box.get('title') or 'Table')}</b>", cell_style), "", "",
                 ])
-
-                # Add every row from the chart/table
                 for row in rows:
-                    row_values = [
-                        "—" if value is None else str(value)
-                        for value in row
-                    ]
-
+                    row_values = ["—" if v is None else str(v) for v in row]
                     if len(row_values) == 1:
-                        table_data.append([
-                            Paragraph(_esc(row_values[0]), cell_style),
-                            "",
-                            "",
-                        ])
-
+                        table_data.append([Paragraph(_esc(row_values[0]), cell_style), "", ""])
                     elif len(row_values) == 2:
                         table_data.append([
                             Paragraph(_esc(row_values[0]), cell_style),
-                            Paragraph(_esc(row_values[1]), cell_style),
-                            "",
+                            Paragraph(_esc(row_values[1]), cell_style), "",
                         ])
-
                     else:
                         table_data.append([
                             Paragraph(_esc(row_values[0]), cell_style),
                             Paragraph(_esc(row_values[1]), cell_style),
-                            Paragraph(
-                                _esc(" | ".join(row_values[2:])),
-                                cell_style,
-                            ),
+                            Paragraph(_esc(" | ".join(row_values[2:])), cell_style),
                         ])
-
-            # Notes
             elif box.get("text"):
                 table_data.append([
-                    Paragraph(
-                        _esc(box.get("title") or "Details"),
-                        cell_style,
-                    ),
-                    Paragraph(
-                        _esc(box.get("text", "")),
-                        cell_style,
-                    ),
-                    "",
+                    Paragraph(_esc(box.get("title") or "Details"), cell_style),
+                    Paragraph(_esc(box.get("text", "")), cell_style), "",
                 ])
 
-        # Create section table
         if len(table_data) > 1:
-            table = Table(
-                table_data,
-                colWidths=[
-                    3.2 * inch,
-                    2.0 * inch,
-                    4.0 * inch,
-                ],
-                repeatRows=1,
-                hAlign="LEFT",
-            )
-
+            table = Table(table_data, colWidths=[3.2 * inch, 2.0 * inch, 4.0 * inch],
+                           repeatRows=1, hAlign="LEFT")
             table.setStyle(TableStyle([
-                # Header
-                (
-                    "BACKGROUND",
-                    (0, 0),
-                    (-1, 0),
-                    colors.HexColor("#0D6E62"),
-                ),
-                (
-                    "TEXTCOLOR",
-                    (0, 0),
-                    (-1, 0),
-                    colors.white,
-                ),
-
-                # Grid
-                (
-                    "GRID",
-                    (0, 0),
-                    (-1, -1),
-                    0.5,
-                    colors.HexColor("#D5DDDA"),
-                ),
-
-                # Alternating rows
-                (
-                    "BACKGROUND",
-                    (0, 1),
-                    (-1, -1),
-                    colors.white,
-                ),
-
-                # Alignment
-                (
-                    "VALIGN",
-                    (0, 0),
-                    (-1, -1),
-                    "MIDDLE",
-                ),
-
-                # Padding
-                (
-                    "TOPPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8,
-                ),
-                (
-                    "BOTTOMPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    8,
-                ),
-                (
-                    "LEFTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    10,
-                ),
-                (
-                    "RIGHTPADDING",
-                    (0, 0),
-                    (-1, -1),
-                    10,
-                ),
-
-                # Value column centered
-                (
-                    "ALIGN",
-                    (1, 1),
-                    (1, -1),
-                    "CENTER",
-                ),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0D6E62")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#D5DDDA")),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.white),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 10),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+                ("ALIGN", (1, 1), (1, -1), "CENTER"),
             ]))
-
             story.append(table)
             story.append(Spacer(1, 16))
 
     doc.build(story)
-
     return buf.getvalue()

@@ -6,12 +6,12 @@ The browser never receives a row it is not entitled to, which is what makes a
 role-scoped link meaningful rather than decorative.
 """
 
+import base64
 import json
 import os
 import re
 import secrets
-import smtplib
-from email.message import EmailMessage
+import requests
 from datetime import datetime ,date
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -1156,132 +1156,64 @@ def email_public_report(key, token):
     )
 
     # ----------------------------------------------------------
-    # Email body
+    # Send via WorkFlow's shared branded-email system (template AR01,
+    # "Analytical Report") instead of a bare SMTP message built here — reuses
+    # the SMTP credentials WorkFlow already has configured (this service has
+    # none of its own) and gives the send the same masthead/footer every
+    # other transactional email in the app uses. custom_message (if the
+    # sender typed one) is passed through as a variable so it can be shown
+    # if/when the admin adds a {{custom_message}} tag to the template.
     # ----------------------------------------------------------
 
-    if custom_message:
+    workflow_base_url = os.environ.get(
+        "WORKFLOW_BASE_URL", "http://localhost:8000"
+    ).rstrip("/")
 
-        email_body = (
-            f"{custom_message}\n\n"
-            f"Please find the attached report "
-            f"({generated_at})."
-        )
+    workflow_service_token = os.environ.get("WORKFLOW_SERVICE_TOKEN")
 
-    else:
-
-        email_body = (
-            f"Please find the attached report "
-            f"({generated_at})."
-        )
-
-    # ----------------------------------------------------------
-    # SMTP configuration
-    # ----------------------------------------------------------
-
-    smtp_host = os.environ.get(
-        "SMTP_HOST"
-    )
-
-    smtp_port = int(
-        os.environ.get(
-            "SMTP_PORT",
-            "587"
-        )
-    )
-
-    smtp_username = os.environ.get(
-        "SMTP_USERNAME"
-    )
-
-    smtp_password = os.environ.get(
-        "SMTP_PASSWORD"
-    )
-
-    smtp_from = os.environ.get(
-        "SMTP_FROM",
-        smtp_username
-    )
-
-    if not smtp_host:
+    if not workflow_service_token:
         return jsonify(
-            error="SMTP_HOST is not configured"
+            error="WORKFLOW_SERVICE_TOKEN is not configured"
         ), 500
-
-    if not smtp_username:
-        return jsonify(
-            error="SMTP_USERNAME is not configured"
-        ), 500
-
-    if not smtp_password:
-        return jsonify(
-            error="SMTP_PASSWORD is not configured"
-        ), 500
-
-    # ----------------------------------------------------------
-    # Build email
-    # ----------------------------------------------------------
-
-    msg = EmailMessage()
-
-    msg["Subject"] = (
-        f"{report_name} - Report"
-    )
-
-    msg["From"] = smtp_from
-    msg["To"] = recipient
-
-    msg.set_content(
-        email_body
-    )
-
-    # ----------------------------------------------------------
-    # Attach PDF
-    # ----------------------------------------------------------
-
-    msg.add_attachment(
-        pdf_data,
-        maintype="application",
-        subtype="pdf",
-        filename=filename,
-    )
-
-    # ----------------------------------------------------------
-    # Send using SMTP
-    # ----------------------------------------------------------
 
     try:
 
-        print(
-            "Sending report email to:",
-            recipient
+        resp = requests.post(
+            f"{workflow_base_url}/api/email-templates/trigger/AR01",
+            headers={"X-Service-Token": workflow_service_token},
+            json={
+                "to_email": recipient,
+                "variables": {
+                    "report_name": report_name,
+                    "generated_at": generated_at,
+                    "custom_message": custom_message,
+                },
+                "attachments": [
+                    {
+                        "filename": filename,
+                        "content_base64": base64.b64encode(pdf_data).decode("ascii"),
+                        "subtype": "pdf",
+                    }
+                ],
+            },
+            timeout=30,
         )
 
-        with smtplib.SMTP(
-            smtp_host,
-            smtp_port
-        ) as smtp:
+        resp.raise_for_status()
 
-            smtp.ehlo()
-
-            smtp.starttls()
-
-            smtp.ehlo()
-
-            smtp.login(
-                smtp_username,
-                smtp_password
-            )
-
-            smtp.send_message(msg)
+        if not resp.json().get("sent"):
+            return jsonify(
+                error="email template AR01 is missing or disabled"
+            ), 500
 
         print(
-            "REPORT EMAIL SENT SUCCESSFULLY"
+            "REPORT EMAIL SENT SUCCESSFULLY via WorkFlow (AR01)"
         )
 
     except Exception as exc:
 
         print(
-            "SMTP ERROR:",
+            "WORKFLOW EMAIL TRIGGER ERROR:",
             exc
         )
 

@@ -10,6 +10,9 @@ import json
 import os
 import re
 import secrets
+import smtplib
+from email.message import EmailMessage
+from datetime import datetime ,date
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import wraps
@@ -978,6 +981,325 @@ def export_public_report(key, token, fmt):
     )
 
     return resp
+
+
+# ==============================================================
+# EMAIL PUBLIC REPORT
+# ==============================================================
+
+@app.post("/api/r/<key>/<token>/email")
+def email_public_report(key, token):
+
+    # ----------------------------------------------------------
+    # Validate public link
+    # ----------------------------------------------------------
+
+    pub = _resolve_pub(key, token)
+
+    if not pub:
+        return jsonify(error="this link is not live"), 404
+
+    # ----------------------------------------------------------
+    # Read request body
+    # ----------------------------------------------------------
+
+    body = request.get_json(silent=True) or {}
+
+    recipient = (body.get("email") or "").strip()
+    custom_message = (body.get("message") or "").strip()
+
+    if not recipient:
+        return jsonify(error="recipient email is required"), 400
+
+    # ----------------------------------------------------------
+    # Get published version
+    # ----------------------------------------------------------
+
+    ver = db.q1(
+        "SELECT definition FROM process_versions "
+        "WHERE process_id=%s AND version=%s",
+        (
+            pub["process_id"],
+            pub["pinned_version"]
+        )
+    )
+
+    if not ver:
+        return jsonify(
+            error="published version not found"
+        ), 404
+
+    definition = (
+        ver["definition"]
+        if isinstance(ver["definition"], dict)
+        else json.loads(ver["definition"])
+    )
+
+    # ----------------------------------------------------------
+    # Apply role visibility
+    # ----------------------------------------------------------
+
+    definition = _definition_for_role(
+        definition,
+        pub["role"]
+    )
+
+    # ----------------------------------------------------------
+    # Resolve connection
+    # ----------------------------------------------------------
+
+    conn_row = _connection_for(
+        cid=pub["connection_id"]
+    )
+
+    if not conn_row:
+        return jsonify(
+            error="no data connection configured"
+        ), 400
+
+    # ----------------------------------------------------------
+    # Read catalogue
+    # ----------------------------------------------------------
+
+    try:
+        cat = _catalogue(conn_row)
+
+    except Exception as exc:
+        return jsonify(
+            error=f"could not read the catalogue: {exc}"
+        ), 502
+
+    # ----------------------------------------------------------
+    # Get filters
+    # ----------------------------------------------------------
+
+    filters = body.get("filters") or {}
+
+    # ----------------------------------------------------------
+    # Execute report
+    # ----------------------------------------------------------
+
+    try:
+
+        results = _execute_boxes(
+            definition,
+            filters,
+            conn_row,
+            cat,
+            allow_forms=False,
+        )
+
+    except Exception as exc:
+
+        return jsonify(
+            error=f"could not execute report: {exc}"
+        ), 500
+
+    # ----------------------------------------------------------
+    # Generate the SAME PDF
+    # ----------------------------------------------------------
+
+    frontend_base_url = os.environ.get(
+        "PUBLIC_BASE_URL",
+        "http://localhost:5173"
+    ).rstrip("/")
+
+    public_url = (
+        f"{frontend_base_url}/r/{key}/{token}"
+    )
+
+    print(
+        "EMAIL PDF PUBLIC URL:",
+        public_url
+    )
+
+    try:
+
+        pdf_data = exporters.build_browser_pdf(
+            public_url
+        )
+
+    except Exception as exc:
+
+        print(
+            "EMAIL PDF GENERATION ERROR:",
+            exc
+        )
+
+        return jsonify(
+            error=f"could not generate PDF: {exc}"
+        ), 500
+
+    # ----------------------------------------------------------
+    # Report name
+    # ----------------------------------------------------------
+
+    report_name = (
+        definition.get("name")
+        or "report"
+    )
+
+    safe_name = re.sub(
+        r"[^\w-]+",
+        "-",
+        report_name
+    ).strip("-").lower() or "report"
+
+    filename = f"{safe_name}.pdf"
+
+    # ----------------------------------------------------------
+    # Current date/time
+    # ----------------------------------------------------------
+
+    generated_at = datetime.now().strftime(
+        "%d %b %Y, %I:%M %p"
+    )
+
+    # ----------------------------------------------------------
+    # Email body
+    # ----------------------------------------------------------
+
+    if custom_message:
+
+        email_body = (
+            f"{custom_message}\n\n"
+            f"Please find the attached report "
+            f"({generated_at})."
+        )
+
+    else:
+
+        email_body = (
+            f"Please find the attached report "
+            f"({generated_at})."
+        )
+
+    # ----------------------------------------------------------
+    # SMTP configuration
+    # ----------------------------------------------------------
+
+    smtp_host = os.environ.get(
+        "SMTP_HOST"
+    )
+
+    smtp_port = int(
+        os.environ.get(
+            "SMTP_PORT",
+            "587"
+        )
+    )
+
+    smtp_username = os.environ.get(
+        "SMTP_USERNAME"
+    )
+
+    smtp_password = os.environ.get(
+        "SMTP_PASSWORD"
+    )
+
+    smtp_from = os.environ.get(
+        "SMTP_FROM",
+        smtp_username
+    )
+
+    if not smtp_host:
+        return jsonify(
+            error="SMTP_HOST is not configured"
+        ), 500
+
+    if not smtp_username:
+        return jsonify(
+            error="SMTP_USERNAME is not configured"
+        ), 500
+
+    if not smtp_password:
+        return jsonify(
+            error="SMTP_PASSWORD is not configured"
+        ), 500
+
+    # ----------------------------------------------------------
+    # Build email
+    # ----------------------------------------------------------
+
+    msg = EmailMessage()
+
+    msg["Subject"] = (
+        f"{report_name} - Report"
+    )
+
+    msg["From"] = smtp_from
+    msg["To"] = recipient
+
+    msg.set_content(
+        email_body
+    )
+
+    # ----------------------------------------------------------
+    # Attach PDF
+    # ----------------------------------------------------------
+
+    msg.add_attachment(
+        pdf_data,
+        maintype="application",
+        subtype="pdf",
+        filename=filename,
+    )
+
+    # ----------------------------------------------------------
+    # Send using SMTP
+    # ----------------------------------------------------------
+
+    try:
+
+        print(
+            "Sending report email to:",
+            recipient
+        )
+
+        with smtplib.SMTP(
+            smtp_host,
+            smtp_port
+        ) as smtp:
+
+            smtp.ehlo()
+
+            smtp.starttls()
+
+            smtp.ehlo()
+
+            smtp.login(
+                smtp_username,
+                smtp_password
+            )
+
+            smtp.send_message(msg)
+
+        print(
+            "REPORT EMAIL SENT SUCCESSFULLY"
+        )
+
+    except Exception as exc:
+
+        print(
+            "SMTP ERROR:",
+            exc
+        )
+
+        return jsonify(
+            error=f"could not send email: {exc}"
+        ), 500
+
+    # ----------------------------------------------------------
+    # Success
+    # ----------------------------------------------------------
+
+    return jsonify(
+        success=True,
+        message="report emailed successfully",
+        recipient=recipient,
+        filename=filename,
+        generated_at=generated_at,
+    )
 
 
 @app.get("/api/health")

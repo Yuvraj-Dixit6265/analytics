@@ -169,6 +169,82 @@ function PublicReportInner({ slug }) {
   >
     Download PPT
   </a>
+  <div
+  style={{
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginBottom: 16,
+  }}
+>
+  <a
+    className="pb go"
+    href={`${API_BASE}/r/${slug}/export/pdf`}
+  >
+    Download PDF
+  </a>
+
+  <a
+    className="pb"
+    href={`${API_BASE}/r/${slug}/export/pptx`}
+  >
+    Download PPT
+  </a>
+
+ <button
+  className="pb"
+  type="button"
+  onClick={async () => {
+    const email = window.prompt(
+      "Enter the email address to send the report to:"
+    );
+
+    if (!email) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/r/${slug}/email`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email.trim(),
+            message: "",
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || "Failed to send report"
+        );
+      }
+
+      window.alert(
+        `Report successfully emailed to ${email}`
+      );
+
+    } catch (error) {
+      console.error(
+        "Email report error:",
+        error
+      );
+
+      window.alert(
+        error.message || "Failed to send report"
+      );
+    }
+  }}
+>
+  Email Report
+</button>
+</div>
 </div>
 
       {/* Published report - read only */}
@@ -208,7 +284,7 @@ function PublicCanvas({ doc }) {
                   const el = document.getElementById(`section-${section.id}`);
 
                   if (el) {
-                    const y = el.getBoundingClientRect().top + window.scrollY - 80;
+                    const y = el.getBoundingClientRect().top + window.scrollY;
 
                     window.scrollTo({
                       top: y,

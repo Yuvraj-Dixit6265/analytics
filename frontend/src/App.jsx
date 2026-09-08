@@ -290,6 +290,47 @@ function Shell() {
           <button className="pb" disabled={exporting === "pptx"} onClick={() => exportAs("pptx")}>
             {exporting === "pptx" ? "Preparing…" : "PPT"}
           </button>
+          <button
+  className="pb"
+  type="button"
+  onClick={async () => {
+    const email = window.prompt(
+      "Enter the email address to send the report to:"
+    );
+
+    if (!email) return;
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/r/${slug}/email`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            email: email.trim(),
+            message: "",
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to send report");
+      }
+
+      window.alert(`Report successfully emailed to ${email}`);
+
+    } catch (error) {
+      console.error("Email report error:", error);
+      window.alert(error.message || "Failed to send report");
+    }
+  }}
+>
+  Email Report
+</button>
           <button className="pb" disabled={exporting === "xlsx"} onClick={() => exportAs("xlsx")}>
             {exporting === "xlsx" ? "Preparing…" : "Excel"}
           </button>

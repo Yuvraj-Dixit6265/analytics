@@ -165,91 +165,357 @@ def build_browser_pdf(url):
         print(i + 1, "| button:", link.get("button"), "| targetY:", link.get("targetY"))
     print("===========================\n")
 
+        # ------------------------------------------------------------------
+    # Add invisible internal PDF links over each section-nav button
+    # ------------------------------------------------------------------
+
+    print("\n=== CREATING PDF SECTION LINKS ===")
+
     for link in section_links:
+
         button = link["button"]
-        target_y_css = link["targetY"]
+        target_y_css = float(link["targetY"])
+
+        # --------------------------------------------------------------
+        # CSS -> final scaled image pixels
+        # --------------------------------------------------------------
 
         button_x1_px = button["x"] * css_to_final
-        button_x2_px = (button["x"] + button["width"]) * css_to_final
-        button_top_px = button["y"] * css_to_final
-        button_bottom_px = (button["y"] + button["height"]) * css_to_final
-        target_y_px = target_y_css * css_to_final
+        button_x2_px = (
+            button["x"] + button["width"]
+        ) * css_to_final
 
-        target_page_index = int(target_y_px // FINAL_HEIGHT_PX)
-        target_page_index = max(0, min(target_page_index, len(writer.pages) - 1))
-
-        button_page_index = int(button_top_px // FINAL_HEIGHT_PX)
-        if button_page_index < 0 or button_page_index >= len(writer.pages):
-            continue
-
-        button_page_top_px = button_page_index * FINAL_HEIGHT_PX
-        button_top_page_px = button_top_px - button_page_top_px
-        button_bottom_page_px = button_bottom_px - button_page_top_px
-
-        button_x1_pt = button_x1_px * PX_TO_PT_X
-        button_x2_pt = button_x2_px * PX_TO_PT_X
-        button_y1_pt = A4_HEIGHT_PT - (button_bottom_page_px * PX_TO_PT_Y)
-        button_y2_pt = A4_HEIGHT_PT - (button_top_page_px * PX_TO_PT_Y)
-
-        button_x1_pt = max(0.0, min(A4_WIDTH_PT, button_x1_pt))
-        button_x2_pt = max(0.0, min(A4_WIDTH_PT, button_x2_pt))
-        button_y1_pt = max(0.0, min(A4_HEIGHT_PT, button_y1_pt))
-        button_y2_pt = max(0.0, min(A4_HEIGHT_PT, button_y2_pt))
-
-        target_page_top_px = target_page_index * FINAL_HEIGHT_PX
-        target_y_page_px = target_y_px - target_page_top_px
-        target_y_pt = A4_HEIGHT_PT - (target_y_page_px * PX_TO_PT_Y)
-        target_y_pt = max(0.0, min(A4_HEIGHT_PT, target_y_pt))
-
-        print(
-            "Creating link:",
-            "| button page =", button_page_index + 1,
-            "| target page =", target_page_index + 1,
-            "| rect =", (round(button_x1_pt, 2), round(button_y1_pt, 2),
-                         round(button_x2_pt, 2), round(button_y2_pt, 2)),
-            "| targetY =", round(target_y_pt, 2),
+        button_top_px = (
+            button["y"] * css_to_final
         )
 
+        button_bottom_px = (
+            (button["y"] + button["height"])
+            * css_to_final
+        )
+
+        target_y_px = (
+            target_y_css * css_to_final
+        )
+
+        # --------------------------------------------------------------
+        # IMPORTANT:
+        #
+        # PDF pages were created using EXACTLY:
+        #
+        # for top in range(0, scaled_height, A4_HEIGHT)
+        #
+        # Therefore use the same 3508px boundary here.
+        # --------------------------------------------------------------
+
+        target_page_index = int(
+            target_y_px // A4_HEIGHT
+        )
+
+        button_page_index = int(
+            button_top_px // A4_HEIGHT
+        )
+
+        # Safety
+        if target_page_index < 0:
+            target_page_index = 0
+
+        if target_page_index >= len(writer.pages):
+            target_page_index = len(writer.pages) - 1
+
+        if button_page_index < 0:
+            continue
+
+        if button_page_index >= len(writer.pages):
+            continue
+
+        # --------------------------------------------------------------
+        # Position of target INSIDE its PDF page
+        # --------------------------------------------------------------
+
+        target_page_top_px = (
+            target_page_index * A4_HEIGHT
+        )
+
+        target_y_page_px = (
+            target_y_px - target_page_top_px
+        )
+
+        # --------------------------------------------------------------
+        # Convert target Y from top-left pixel coordinates
+        # to bottom-left PDF coordinates.
+        # --------------------------------------------------------------
+
+        target_y_pt = (
+            A4_HEIGHT_PT
+            - (
+                target_y_page_px
+                * PX_TO_PT_Y
+            )
+        )
+
+        # --------------------------------------------------------------
+        # Small offset so the section appears slightly below
+        # the top edge of the PDF viewer.
+        # --------------------------------------------------------------
+
+        TARGET_OFFSET_PT = 25.0
+
+        target_y_pt = target_y_pt + TARGET_OFFSET_PT
+
+        # Keep it inside page
+        target_y_pt = max(
+            0.0,
+            min(
+                A4_HEIGHT_PT,
+                target_y_pt
+            )
+        )
+        # --------------------------------------------------------------
+        # Button position INSIDE its PDF page
+        # --------------------------------------------------------------
+
+        button_page_top_px = (
+            button_page_index * A4_HEIGHT
+        )
+
+        button_top_page_px = (
+            button_top_px
+            - button_page_top_px
+        )
+
+        button_bottom_page_px = (
+            button_bottom_px
+            - button_page_top_px
+        )
+
+        # --------------------------------------------------------------
+        # X coordinates
+        # --------------------------------------------------------------
+
+        button_x1_pt = (
+            button_x1_px
+            * PX_TO_PT_X
+        )
+
+        button_x2_pt = (
+            button_x2_px
+            * PX_TO_PT_X
+        )
+
+        # --------------------------------------------------------------
+        # Y coordinates
+        #
+        # Screenshot:
+        #     0 = TOP
+        #
+        # PDF:
+        #     0 = BOTTOM
+        # --------------------------------------------------------------
+
+        button_y1_pt = (
+            A4_HEIGHT_PT
+            - (
+                button_bottom_page_px
+                * PX_TO_PT_Y
+            )
+        )
+
+        button_y2_pt = (
+            A4_HEIGHT_PT
+            - (
+                button_top_page_px
+                * PX_TO_PT_Y
+            )
+        )
+
+        # --------------------------------------------------------------
+        # Clamp annotation rectangle
+        # --------------------------------------------------------------
+
+        button_x1_pt = max(
+            0.0,
+            min(
+                A4_WIDTH_PT,
+                button_x1_pt
+            )
+        )
+
+        button_x2_pt = max(
+            0.0,
+            min(
+                A4_WIDTH_PT,
+                button_x2_pt
+            )
+        )
+
+        button_y1_pt = max(
+            0.0,
+            min(
+                A4_HEIGHT_PT,
+                button_y1_pt
+            )
+        )
+
+        button_y2_pt = max(
+            0.0,
+            min(
+                A4_HEIGHT_PT,
+                button_y2_pt
+            )
+        )
+
+        # --------------------------------------------------------------
+        # DEBUG
+        # --------------------------------------------------------------
+
+        print(
+            "LINK:",
+            link.get("text"),
+            "| button page:",
+            button_page_index + 1,
+            "| target page:",
+            target_page_index + 1,
+            "| target CSS Y:",
+            round(target_y_css, 2),
+            "| target PX:",
+            round(target_y_px, 2),
+            "| target page PX:",
+            round(target_y_page_px, 2),
+            "| target PDF Y:",
+            round(target_y_pt, 2),
+        )
+
+        # --------------------------------------------------------------
+        # Create PDF destination
+        #
+        # /FitH = fit page horizontally and place this Y
+        # coordinate at the top of the viewer.
+        # --------------------------------------------------------------
+
+        destination = ArrayObject([
+            writer.pages[target_page_index].indirect_reference,
+            NameObject("/FitH"),
+            FloatObject(target_y_pt),
+        ])
+
+        # --------------------------------------------------------------
+        # Create invisible link annotation
+        # --------------------------------------------------------------
+
         annotation = DictionaryObject()
+
         annotation.update({
-            NameObject("/Type"): NameObject("/Annot"),
-            NameObject("/Subtype"): NameObject("/Link"),
-            NameObject("/Rect"): ArrayObject([
-                FloatObject(button_x1_pt), FloatObject(button_y1_pt),
-                FloatObject(button_x2_pt), FloatObject(button_y2_pt),
-            ]),
-            NameObject("/Border"): ArrayObject([
-                NumberObject(0), NumberObject(0), NumberObject(0),
-            ]),
-            NameObject("/A"): DictionaryObject({
-                NameObject("/S"): NameObject("/GoTo"),
-                NameObject("/D"): ArrayObject([
-                    writer.pages[target_page_index].indirect_reference,
-                    NameObject("/XYZ"), NullObject(),
-                    FloatObject(target_y_pt), NullObject(),
+
+            NameObject("/Type"):
+                NameObject("/Annot"),
+
+            NameObject("/Subtype"):
+                NameObject("/Link"),
+
+            NameObject("/Rect"):
+                ArrayObject([
+                    FloatObject(button_x1_pt),
+                    FloatObject(button_y1_pt),
+                    FloatObject(button_x2_pt),
+                    FloatObject(button_y2_pt),
                 ]),
-            }),
+
+            # Completely invisible border
+            NameObject("/Border"):
+                ArrayObject([
+                    NumberObject(0),
+                    NumberObject(0),
+                    NumberObject(0),
+                ]),
+
+            # Internal PDF navigation
+            NameObject("/A"):
+                DictionaryObject({
+                    NameObject("/S"):
+                        NameObject("/GoTo"),
+
+                    NameObject("/D"):
+                        destination,
+                }),
         })
 
-        annotation_ref = writer._add_object(annotation)
-        pdf_page_obj = writer.pages[button_page_index]
+        # --------------------------------------------------------------
+        # Add annotation object
+        # --------------------------------------------------------------
+
+        annotation_ref = writer._add_object(
+            annotation
+        )
+
+        # --------------------------------------------------------------
+        # Add annotation to the page containing the button
+        # --------------------------------------------------------------
+
+        pdf_page_obj = writer.pages[
+            button_page_index
+        ]
+
         if "/Annots" not in pdf_page_obj:
-            pdf_page_obj[NameObject("/Annots")] = ArrayObject()
-        pdf_page_obj[NameObject("/Annots")].append(annotation_ref)
+            pdf_page_obj[
+                NameObject("/Annots")
+            ] = ArrayObject()
+
+        pdf_page_obj[
+            NameObject("/Annots")
+        ].append(annotation_ref)
+
+    # ------------------------------------------------------------------
+    # VERIFY PDF ANNOTATIONS
+    # ------------------------------------------------------------------
 
     print("\n=== VERIFYING PDF ANNOTATIONS ===")
+
     total_annotations = 0
+
     for i, pg in enumerate(writer.pages):
+
         annots = pg.get("/Annots")
-        count = len(annots) if annots else 0
+
+        count = (
+            len(annots)
+            if annots
+            else 0
+        )
+
         total_annotations += count
-        print("PAGE", i + 1, "ANNOTATIONS:", count)
-    print("TOTAL PDF ANNOTATIONS:", total_annotations)
+
+        print(
+            "PAGE",
+            i + 1,
+            "ANNOTATIONS:",
+            count
+        )
+
+    print(
+        "TOTAL PDF ANNOTATIONS:",
+        total_annotations
+    )
+
+    # ------------------------------------------------------------------
+    # Write final PDF
+    # ------------------------------------------------------------------
 
     final_output = io.BytesIO()
-    writer.write(final_output)
-    final_pdf = final_output.getvalue()
-    print("\nFINAL PDF SIZE:", len(final_pdf))
+
+    writer.write(
+        final_output
+    )
+
+    final_pdf = (
+        final_output.getvalue()
+    )
+
+    print(
+        "FINAL PDF SIZE:",
+        len(final_pdf)
+    )
+
     return final_pdf
 
 

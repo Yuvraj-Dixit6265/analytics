@@ -11,6 +11,11 @@ export default defineConfig({
   base: process.env.VITE_BASE_PATH || "/",
   server: {
     port: 5173,
-    proxy: { "/api": { target: process.env.VITE_BACKEND_TARGET || "http://localhost:5001", changeOrigin: true } },
+    proxy: {
+      "/api": {
+        target: process.env.VITE_BACKEND_TARGET || "http://localhost:5001",
+        changeOrigin: true,
+      },
+    },
   },
 });

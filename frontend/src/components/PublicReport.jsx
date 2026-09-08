@@ -203,7 +203,7 @@ function PublicCanvas({ doc }) {
               <button
                 key={section.id}
                 type="button"
-                className="section-nav-item"
+                className="section-nav-item TEST-BUTTON" data-test-nav="yes"
                 onClick={() => {
                   const el = document.getElementById(`section-${section.id}`);
 

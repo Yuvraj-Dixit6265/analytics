@@ -161,7 +161,9 @@ export default function Chart({ data, cfg = {} }) {
       Math.abs(values[mainIndex] || 0);
 
     const percentage =
-      total > 0
+      cfg.source === "value_boxes"
+        ? mainValue
+        : total > 0
         ? (mainValue / total) * 100
         : 0;
 

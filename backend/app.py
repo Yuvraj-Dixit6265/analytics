@@ -1132,10 +1132,15 @@ def _generate_and_send_report(pub, key, token, recipient, custom_message="", fil
     # "Analytical Report") instead of a bare SMTP message built here — reuses
     # the SMTP credentials WorkFlow already has configured (this service has
     # none of its own) and gives the send the same masthead/footer every
-    # other transactional email in the app uses. custom_message (if the
-    # sender typed one) is passed through as a variable so it can be shown
-    # if/when the admin adds a {{custom_message}} tag to the template.
+    # other transactional email in the app uses. AR01's intro is just
+    # {{custom_message}} — the fallback text below is what renders when
+    # nobody typed one (an on-demand send, or a schedule with no message set).
     # ----------------------------------------------------------
+
+    email_body_message = (custom_message or "").strip() or (
+        "Please find the attached analytical report generated from the NEXD dashboard.\n\n"
+        "The attached PDF contains the latest report data and visualizations."
+    )
 
     workflow_base_url = os.environ.get(
         "WORKFLOW_BASE_URL", "http://localhost:8000"
@@ -1156,7 +1161,7 @@ def _generate_and_send_report(pub, key, token, recipient, custom_message="", fil
                 "variables": {
                     "report_name": report_name,
                     "generated_at": generated_at,
-                    "custom_message": custom_message,
+                    "custom_message": email_body_message,
                 },
                 "attachments": [
                     {

@@ -90,3 +90,26 @@ CREATE TABLE IF NOT EXISTS publication_access (
 
 CREATE INDEX idx_proc_updated ON processes (updated_at);
 CREATE INDEX idx_acc_opened  ON publication_access (opened_at);
+
+-- A recurring "email this report" send. interval_hours follows the same
+-- convention WorkFlow's own scheduled_message/reminder tables use (a plain
+-- hour count rather than a cron string) — 24 for daily, 168 for weekly, etc.
+-- run_scheduled_reports.py (a systemd-timer-driven script, not an in-process
+-- scheduler — this app runs under multiple gunicorn workers, so an in-process
+-- scheduler would fire the same send once per worker) picks up anything due.
+CREATE TABLE IF NOT EXISTS report_schedules (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  publication_id INT NOT NULL,
+  recipients     JSON NOT NULL,
+  interval_hours INT NOT NULL DEFAULT 24,
+  message        VARCHAR(500) NOT NULL DEFAULT '',
+  is_active      TINYINT(1) NOT NULL DEFAULT 1,
+  last_sent_at   TIMESTAMP NULL,
+  last_error     VARCHAR(500) NULL,
+  created_by     INT NULL,
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_sched_pub FOREIGN KEY (publication_id)
+    REFERENCES publications(id) ON DELETE CASCADE,
+  CONSTRAINT fk_sched_user FOREIGN KEY (created_by)
+    REFERENCES users(id) ON DELETE SET NULL
+) ENGINE=InnoDB;

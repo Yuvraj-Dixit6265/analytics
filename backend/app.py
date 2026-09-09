@@ -987,29 +987,17 @@ def export_public_report(key, token, fmt):
 # EMAIL PUBLIC REPORT
 # ==============================================================
 
-@app.post("/api/r/<key>/<token>/email")
-def email_public_report(key, token):
+def _generate_and_send_report(pub, key, token, recipient, custom_message="", filters=None):
+    """Core of "email this report": render the same PDF the public link shows
+    and send it through WorkFlow's AR01 template. Shared by the on-demand
+    HTTP route below and run_scheduled_reports.py (the scheduler), so a
+    scheduled send behaves identically to a human clicking "Email report" —
+    same role-scoped definition, same PDF, same branded template.
 
-    # ----------------------------------------------------------
-    # Validate public link
-    # ----------------------------------------------------------
-
-    pub = _resolve_pub(key, token)
-
-    if not pub:
-        return jsonify(error="this link is not live"), 404
-
-    # ----------------------------------------------------------
-    # Read request body
-    # ----------------------------------------------------------
-
-    body = request.get_json(silent=True) or {}
-
-    recipient = (body.get("email") or "").strip()
-    custom_message = (body.get("message") or "").strip()
-
-    if not recipient:
-        return jsonify(error="recipient email is required"), 400
+    Returns (ok: bool, error: str | None, info: dict) — info carries
+    filename/generated_at/report_name on success, for the caller to log or
+    return as-is.
+    """
 
     # ----------------------------------------------------------
     # Get published version
@@ -1025,9 +1013,7 @@ def email_public_report(key, token):
     )
 
     if not ver:
-        return jsonify(
-            error="published version not found"
-        ), 404
+        return False, "published version not found", {}
 
     definition = (
         ver["definition"]
@@ -1053,9 +1039,7 @@ def email_public_report(key, token):
     )
 
     if not conn_row:
-        return jsonify(
-            error="no data connection configured"
-        ), 400
+        return False, "no data connection configured", {}
 
     # ----------------------------------------------------------
     # Read catalogue
@@ -1065,25 +1049,17 @@ def email_public_report(key, token):
         cat = _catalogue(conn_row)
 
     except Exception as exc:
-        return jsonify(
-            error=f"could not read the catalogue: {exc}"
-        ), 502
+        return False, f"could not read the catalogue: {exc}", {}
 
     # ----------------------------------------------------------
-    # Get filters
-    # ----------------------------------------------------------
-
-    filters = body.get("filters") or {}
-
-    # ----------------------------------------------------------
-    # Execute report
+    # Execute report (fail fast before spending a browser PDF render)
     # ----------------------------------------------------------
 
     try:
 
-        results = _execute_boxes(
+        _execute_boxes(
             definition,
-            filters,
+            filters or {},
             conn_row,
             cat,
             allow_forms=False,
@@ -1091,9 +1067,7 @@ def email_public_report(key, token):
 
     except Exception as exc:
 
-        return jsonify(
-            error=f"could not execute report: {exc}"
-        ), 500
+        return False, f"could not execute report: {exc}", {}
 
     # ----------------------------------------------------------
     # Generate the SAME PDF
@@ -1126,9 +1100,7 @@ def email_public_report(key, token):
             exc
         )
 
-        return jsonify(
-            error=f"could not generate PDF: {exc}"
-        ), 500
+        return False, f"could not generate PDF: {exc}", {}
 
     # ----------------------------------------------------------
     # Report name
@@ -1172,9 +1144,7 @@ def email_public_report(key, token):
     workflow_service_token = os.environ.get("WORKFLOW_SERVICE_TOKEN")
 
     if not workflow_service_token:
-        return jsonify(
-            error="WORKFLOW_SERVICE_TOKEN is not configured"
-        ), 500
+        return False, "WORKFLOW_SERVICE_TOKEN is not configured", {}
 
     try:
 
@@ -1202,9 +1172,7 @@ def email_public_report(key, token):
         resp.raise_for_status()
 
         if not resp.json().get("sent"):
-            return jsonify(
-                error="email template AR01 is missing or disabled"
-            ), 500
+            return False, "email template AR01 is missing or disabled", {}
 
         print(
             "REPORT EMAIL SENT SUCCESSFULLY via WorkFlow (AR01)"
@@ -1217,21 +1185,158 @@ def email_public_report(key, token):
             exc
         )
 
-        return jsonify(
-            error=f"could not send email: {exc}"
-        ), 500
+        return False, f"could not send email: {exc}", {}
 
-    # ----------------------------------------------------------
-    # Success
-    # ----------------------------------------------------------
+    return True, None, {
+        "filename": filename,
+        "generated_at": generated_at,
+        "report_name": report_name,
+    }
+
+
+@app.post("/api/r/<key>/<token>/email")
+def email_public_report(key, token):
+
+    pub = _resolve_pub(key, token)
+
+    if not pub:
+        return jsonify(error="this link is not live"), 404
+
+    body = request.get_json(silent=True) or {}
+
+    recipient = (body.get("email") or "").strip()
+    custom_message = (body.get("message") or "").strip()
+
+    if not recipient:
+        return jsonify(error="recipient email is required"), 400
+
+    ok, error, info = _generate_and_send_report(
+        pub, key, token, recipient, custom_message, filters=body.get("filters") or {}
+    )
+
+    if not ok:
+        return jsonify(error=error), 500
 
     return jsonify(
         success=True,
         message="report emailed successfully",
         recipient=recipient,
-        filename=filename,
-        generated_at=generated_at,
+        **info,
     )
+
+
+# ==============================================================
+# REPORT EMAIL SCHEDULES
+# ==============================================================
+# Recurring "email this report" sends. The actual sending happens out of
+# process — see run_scheduled_reports.py — this section is just CRUD over
+# the report_schedules table plus resolving which publication a schedule
+# targets.
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@app.get("/api/schedules")
+@auth()
+def list_schedules():
+    rows = db.qall(
+        "SELECT rs.id, rs.recipients, rs.interval_hours, rs.message, rs.is_active, "
+        "       rs.last_sent_at, rs.last_error, rs.created_at, "
+        "       p.process_key, p.name AS process_name, pub.role, pub.token "
+        "FROM report_schedules rs "
+        "JOIN processes p ON p.id = (SELECT process_id FROM publications WHERE id = rs.publication_id) "
+        "JOIN publications pub ON pub.id = rs.publication_id "
+        "ORDER BY rs.created_at DESC"
+    )
+    for r in rows:
+        if isinstance(r.get("recipients"), str):
+            r["recipients"] = json.loads(r["recipients"])
+    return jsonify(db.clean(rows))
+
+
+@app.post("/api/schedules")
+@auth("admin")
+def create_schedule():
+    b = request.get_json(silent=True) or {}
+
+    process_key = (b.get("processKey") or "").strip()
+    role = (b.get("role") or "").strip()
+    recipients = [e.strip() for e in (b.get("recipients") or []) if e and e.strip()]
+    interval_hours = int(b.get("intervalHours") or 24)
+    message = (b.get("message") or "").strip()
+
+    if not process_key:
+        return jsonify(error="processKey is required"), 400
+    if not recipients:
+        return jsonify(error="at least one recipient is required"), 400
+    bad = [e for e in recipients if not _EMAIL_RE.match(e)]
+    if bad:
+        return jsonify(error=f"not a valid email address: {', '.join(bad)}"), 400
+    if interval_hours < 1:
+        return jsonify(error="intervalHours must be at least 1"), 400
+
+    proc = db.q1("SELECT id FROM processes WHERE process_key=%s", (process_key,))
+    if not proc:
+        return jsonify(error="no such report"), 404
+
+    pub = db.q1(
+        "SELECT id FROM publications WHERE process_id=%s AND role=%s AND is_active=1",
+        (proc["id"], role),
+    )
+    if not pub:
+        return jsonify(error="this report has no live published link for that role — publish it first"), 400
+
+    sid = db.execute(
+        "INSERT INTO report_schedules (publication_id, recipients, interval_hours, message, created_by) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        (pub["id"], json.dumps(recipients), interval_hours, message, g.user["sub"]),
+    )
+    return jsonify(db.clean(db.q1("SELECT * FROM report_schedules WHERE id=%s", (sid,))))
+
+
+@app.patch("/api/schedules/<int:sid>")
+@auth("admin")
+def update_schedule(sid):
+    b = request.get_json(silent=True) or {}
+    row = db.q1("SELECT id FROM report_schedules WHERE id=%s", (sid,))
+    if not row:
+        return jsonify(error="no such schedule"), 404
+
+    fields, args = [], []
+    if "recipients" in b:
+        recipients = [e.strip() for e in (b.get("recipients") or []) if e and e.strip()]
+        if not recipients:
+            return jsonify(error="at least one recipient is required"), 400
+        bad = [e for e in recipients if not _EMAIL_RE.match(e)]
+        if bad:
+            return jsonify(error=f"not a valid email address: {', '.join(bad)}"), 400
+        fields.append("recipients=%s")
+        args.append(json.dumps(recipients))
+    if "intervalHours" in b:
+        interval_hours = int(b["intervalHours"] or 0)
+        if interval_hours < 1:
+            return jsonify(error="intervalHours must be at least 1"), 400
+        fields.append("interval_hours=%s")
+        args.append(interval_hours)
+    if "message" in b:
+        fields.append("message=%s")
+        args.append((b.get("message") or "").strip())
+    if "isActive" in b:
+        fields.append("is_active=%s")
+        args.append(1 if b["isActive"] else 0)
+    if not fields:
+        return jsonify(error="nothing to change"), 400
+
+    args.append(sid)
+    db.execute(f"UPDATE report_schedules SET {', '.join(fields)} WHERE id=%s", tuple(args))
+    return jsonify(db.clean(db.q1("SELECT * FROM report_schedules WHERE id=%s", (sid,))))
+
+
+@app.delete("/api/schedules/<int:sid>")
+@auth("admin")
+def delete_schedule(sid):
+    db.execute("DELETE FROM report_schedules WHERE id=%s", (sid,))
+    return jsonify(success=True)
 
 
 @app.get("/api/health")

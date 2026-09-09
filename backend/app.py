@@ -1226,117 +1226,36 @@ def email_public_report(key, token):
 
 
 # ==============================================================
-# REPORT EMAIL SCHEDULES
+# INTERNAL — for WorkFlow only (report_schedules and its admin UI live
+# there; this service just renders reports and sends them, on request or on
+# WorkFlow's behalf). Gated by the same shared secret WorkFlow's own
+# /api/email-templates/trigger/{mail_key} checks, reused here in the other
+# direction rather than inventing a second secret for one endpoint.
 # ==============================================================
-# Recurring "email this report" sends. The actual sending happens out of
-# process — see run_scheduled_reports.py — this section is just CRUD over
-# the report_schedules table plus resolving which publication a schedule
-# targets.
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+def _require_service_token():
+    expected = os.environ.get("WORKFLOW_SERVICE_TOKEN")
+    got = request.headers.get("X-Service-Token")
+    if not expected or got != expected:
+        return jsonify(error="invalid or missing service token"), 401
+    return None
 
 
-@app.get("/api/schedules")
-@auth()
-def list_schedules():
+@app.get("/api/internal/reports")
+def list_reports_for_workflow():
+    """Every live published report link, for WorkFlow's "pick a report"
+    schedule-creation dropdown — includes the key/token/role WorkFlow needs
+    to later call POST /api/r/<key>/<token>/email on a schedule's behalf."""
+    denied = _require_service_token()
+    if denied:
+        return denied
     rows = db.qall(
-        "SELECT rs.id, rs.recipients, rs.interval_hours, rs.message, rs.is_active, "
-        "       rs.last_sent_at, rs.last_error, rs.created_at, "
-        "       p.process_key, p.name AS process_name, pub.role, pub.token "
-        "FROM report_schedules rs "
-        "JOIN processes p ON p.id = (SELECT process_id FROM publications WHERE id = rs.publication_id) "
-        "JOIN publications pub ON pub.id = rs.publication_id "
-        "ORDER BY rs.created_at DESC"
+        "SELECT p.process_key, p.name AS report_name, pub.token, pub.role "
+        "FROM publications pub JOIN processes p ON p.id = pub.process_id "
+        "WHERE pub.is_active = 1 "
+        "ORDER BY p.name, pub.role"
     )
-    for r in rows:
-        if isinstance(r.get("recipients"), str):
-            r["recipients"] = json.loads(r["recipients"])
     return jsonify(db.clean(rows))
-
-
-@app.post("/api/schedules")
-@auth("admin")
-def create_schedule():
-    b = request.get_json(silent=True) or {}
-
-    process_key = (b.get("processKey") or "").strip()
-    role = (b.get("role") or "").strip()
-    recipients = [e.strip() for e in (b.get("recipients") or []) if e and e.strip()]
-    interval_hours = int(b.get("intervalHours") or 24)
-    message = (b.get("message") or "").strip()
-
-    if not process_key:
-        return jsonify(error="processKey is required"), 400
-    if not recipients:
-        return jsonify(error="at least one recipient is required"), 400
-    bad = [e for e in recipients if not _EMAIL_RE.match(e)]
-    if bad:
-        return jsonify(error=f"not a valid email address: {', '.join(bad)}"), 400
-    if interval_hours < 1:
-        return jsonify(error="intervalHours must be at least 1"), 400
-
-    proc = db.q1("SELECT id FROM processes WHERE process_key=%s", (process_key,))
-    if not proc:
-        return jsonify(error="no such report"), 404
-
-    pub = db.q1(
-        "SELECT id FROM publications WHERE process_id=%s AND role=%s AND is_active=1",
-        (proc["id"], role),
-    )
-    if not pub:
-        return jsonify(error="this report has no live published link for that role — publish it first"), 400
-
-    sid = db.execute(
-        "INSERT INTO report_schedules (publication_id, recipients, interval_hours, message, created_by) "
-        "VALUES (%s,%s,%s,%s,%s)",
-        (pub["id"], json.dumps(recipients), interval_hours, message, g.user["sub"]),
-    )
-    return jsonify(db.clean(db.q1("SELECT * FROM report_schedules WHERE id=%s", (sid,))))
-
-
-@app.patch("/api/schedules/<int:sid>")
-@auth("admin")
-def update_schedule(sid):
-    b = request.get_json(silent=True) or {}
-    row = db.q1("SELECT id FROM report_schedules WHERE id=%s", (sid,))
-    if not row:
-        return jsonify(error="no such schedule"), 404
-
-    fields, args = [], []
-    if "recipients" in b:
-        recipients = [e.strip() for e in (b.get("recipients") or []) if e and e.strip()]
-        if not recipients:
-            return jsonify(error="at least one recipient is required"), 400
-        bad = [e for e in recipients if not _EMAIL_RE.match(e)]
-        if bad:
-            return jsonify(error=f"not a valid email address: {', '.join(bad)}"), 400
-        fields.append("recipients=%s")
-        args.append(json.dumps(recipients))
-    if "intervalHours" in b:
-        interval_hours = int(b["intervalHours"] or 0)
-        if interval_hours < 1:
-            return jsonify(error="intervalHours must be at least 1"), 400
-        fields.append("interval_hours=%s")
-        args.append(interval_hours)
-    if "message" in b:
-        fields.append("message=%s")
-        args.append((b.get("message") or "").strip())
-    if "isActive" in b:
-        fields.append("is_active=%s")
-        args.append(1 if b["isActive"] else 0)
-    if not fields:
-        return jsonify(error="nothing to change"), 400
-
-    args.append(sid)
-    db.execute(f"UPDATE report_schedules SET {', '.join(fields)} WHERE id=%s", tuple(args))
-    return jsonify(db.clean(db.q1("SELECT * FROM report_schedules WHERE id=%s", (sid,))))
-
-
-@app.delete("/api/schedules/<int:sid>")
-@auth("admin")
-def delete_schedule(sid):
-    db.execute("DELETE FROM report_schedules WHERE id=%s", (sid,))
-    return jsonify(success=True)
 
 
 @app.get("/api/health")

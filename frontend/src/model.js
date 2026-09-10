@@ -131,7 +131,14 @@ export function ensureConfigs(b) {
   palette: 0,
 };
   if (!b.table) b.table = {
-    columns: [], limit: 8, sort: "", dir: "asc", zebra: true, totals: false, headStyle: S(),
+    columns: [],
+    limit: 8,
+    sort: "",
+    dir: "asc",
+    zebra: true,
+    totals: false,
+    headStyle: S(),
+    graphBoxId: "",
   };
   if (!b.manualTable) b.manualTable = {
   columns: [

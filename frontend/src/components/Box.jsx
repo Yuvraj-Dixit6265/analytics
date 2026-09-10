@@ -362,7 +362,65 @@ function Body({ box }) {
     </div>
   );
 }
+/* GRAPH TABLE */
+if (box.tableMode === "graph") {
+  const graphBox = state.doc.sections
+    .flatMap((section) => section.boxes || [])
+    .find((b) => b.id === box.table?.graphBoxId);
 
+  const graphData = graphBox
+    ? state.results[graphBox.id]?.data || []
+    : [];
+
+  if (!graphBox) {
+    return (
+      <div className="empty">
+        Select a graph in <b>⚙ Set up</b>.
+      </div>
+    );
+  }
+
+  if (!graphData.length) {
+    return (
+      <div className="empty">
+        Waiting for graph data.
+      </div>
+    );
+  }
+
+  const rows = graphData.slice(0, box.table?.limit || 10);
+
+  return (
+    <table className="rt">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th className="num">Value</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {rows.map((row, i) => (
+          <tr
+            key={i}
+            className={
+              box.table?.zebra && i % 2 ? "z" : undefined
+            }
+          >
+            <td>{row.label}</td>
+            <td className="num">
+              {fmtNumber(
+                row.value,
+                0,
+                locale
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
     /* table */
   if (box.tableMode === "manual") {
     const t = box.manualTable;
@@ -679,13 +737,18 @@ function Panel({ box, cols }) {
                 value={box.tableMode || "data"}
                 options={[
                   ["data", "Data table"],
+                  ["graph", "Graph table"],
                   ["manual", "Manual table"],
                 ]}
                 onChange={(v) => set("tableMode", v)}
               />
 
-              {box.tableMode !== "manual" && (
+              {box.tableMode === "data" && (
                 <TableData box={box} set={set} />
+              )}
+
+              {box.tableMode === "graph" && (
+                <GraphTableData box={box} set={set} />
               )}
 
               {box.tableMode === "manual" && (
@@ -734,13 +797,18 @@ function Panel({ box, cols }) {
                 value={box.tableMode || "data"}
                 options={[
                   ["data", "Data table"],
+                  ["graph", "Graph table"],
                   ["manual", "Manual table"],
                 ]}
                 onChange={(v) => set("tableMode", v)}
               />
 
-              {box.tableMode !== "manual" && (
+              {box.tableMode === "data" && (
                 <TableData box={box} set={set} />
+              )}
+
+              {box.tableMode === "graph" && (
+                <GraphTableData box={box} set={set} />
               )}
 
               {box.tableMode === "manual" && (
@@ -898,7 +966,7 @@ function ValueFormat({ box, set }) {
 
 /* ---- chart ---- */
 function ChartData({ box, set }) {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const c = box.chart || {};
 
   const cols = colOptions(state.catalog, box.src).map((x) => x.name);
@@ -947,6 +1015,7 @@ function ChartData({ box, set }) {
         options={CHARTS}
         onChange={(v) => set("chart.type", v)}
       />
+      
 
       <Row style={{ marginTop: 9 }}>
         <Field label="Data source">
@@ -1228,7 +1297,63 @@ function ChartFormat({ box, set }) {
     </>
   );
 }
+/* ---- graph table ---- */
+function GraphTableData({ box, set }) {
+  const { state } = useStore();
+  const c = box.table || {};
 
+  const graphBoxes = state.doc.sections
+    .flatMap((section) =>
+      (section.boxes || []).map((b) => ({
+        ...b,
+        sectionName: section.name || "Unnamed section",
+      }))
+    )
+    .filter(
+      (b) =>
+        b.kind === "chart" &&
+        b.id !== box.id
+    );
+
+  return (
+    <>
+      <Group>Graph source</Group>
+
+      <Field label="Graph">
+        <Select
+          value={c.graphBoxId || ""}
+          options={[
+            ["", "Select a graph"],
+            ...graphBoxes.map((g) => [
+              g.id,
+              `${g.title || "Untitled graph"} · ${g.sectionName}`,
+            ]),
+          ]}
+          onChange={(v) => set("table.graphBoxId", v)}
+        />
+      </Field>
+
+      {c.graphBoxId && (
+        <Hint>
+          This table reads the selected graph's data automatically.
+        </Hint>
+      )}
+
+      <Group>Rows</Group>
+
+      <Row>
+        <Field label="Rows">
+          <Select
+            value={c.limit || 10}
+            numeric
+            options={[5, 8, 10, 15, 25, 50]}
+            onChange={(v) => set("table.limit", v)}
+          />
+        </Field>
+      </Row>
+    </>
+  );
+}
 /* ---- table ---- */
 function TableData({ box, set }) {
   const { state, dispatch } = useStore();

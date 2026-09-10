@@ -116,6 +116,10 @@ export function ensureConfigs(b) {
   // Value-box based charts
   valueBoxes: [],
 
+  tableBoxId: "",
+  tableCategoryColumnId: "",
+  tableValueColumnId: "",
+
   legendPos: "bottom",
   limit: 8,
   sort: "value",

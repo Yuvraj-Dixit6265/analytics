@@ -638,37 +638,7 @@ function Section({ section: sc, index }) {
           <button title="Move up" onClick={() => dispatch({ type: "moveSection", id: sc.id, d: -1 })}>↑</button>
           <button title="Move down" onClick={() => dispatch({ type: "moveSection", id: sc.id, d: 1 })}>↓</button>
           <button onClick={() => dispatch({ type: "dupSection", id: sc.id })}>⧉ Copy</button>
-          <button
-  onClick={() => {
-    const recipient = window.prompt("Enter recipient email:");
-
-    if (!recipient) return;
-
-    fetch(`/api/r/${key}/${token}/email`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        recipient,
-      }),
-    })
-      .then(async (res) => {
-        const data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(data.error || "Failed to send email");
-        }
-
-        alert("Report emailed successfully");
-      })
-      .catch((err) => {
-        alert(err.message);
-      });
-  }}
->
-  Email Report
-</button>
+          
           <button className="warn" title="Delete this section"
             onClick={() => dispatch({ type: "askDel", sel: { kind: "section", id: sc.id } })}>🗑 Delete</button>
         </div>

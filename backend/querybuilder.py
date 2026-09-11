@@ -127,8 +127,16 @@ def _condition(scope, col_sql, op, value, params):
     """One WHERE fragment. Values are bound, never interpolated."""
     if op == "blank":
         return f"{col_sql} IS NULL OR {col_sql} = ''"
+
     if op == "notblank":
         return f"{col_sql} IS NOT NULL AND {col_sql} <> ''"
+
+    if op == "null":
+        return f"{col_sql} IS NULL"
+
+    if op == "notnull":
+        return f"{col_sql} IS NOT NULL"
+
     if value in (None, ""):
         return None
     if op == "contains":

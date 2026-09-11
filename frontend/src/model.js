@@ -24,7 +24,7 @@ export const AGGS = ["SUM", "AVG", "COUNT", "COUNT DISTINCT", "MIN", "MAX"];
 export const JOIN_TYPES = [["INNER", "INNER JOIN"], ["LEFT", "LEFT JOIN"]];
 export const OPS = [["=", "="], ["<>", "≠"], [">", ">"], [">=", "≥"], ["<", "<"], ["<=", "≤"],
   ["contains", "contains"], ["starts", "starts with"], ["in", "in list"],
-  ["blank", "is blank"], ["notblank", "is not blank"]];
+  ["blank", "is blank"], ["null", "is null"], ["notblank", "is not blank"]];
 export const CHARTS = [
   ["bar", "Bar"],
   ["hbar", "Bars →"],

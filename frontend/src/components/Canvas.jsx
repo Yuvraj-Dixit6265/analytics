@@ -556,39 +556,134 @@ function FilterPanel({ filter: f }) {
           </Row>
           <Hint>Applies to every box whose tables carry a column of this name.</Hint>
 
+
           <Group>Who can see this filter on a published link</Group>
           <RoleChips value={f.roles} onChange={(v) => set("roles", v)} />
           <Hint>Nothing picked = shown on every published link, whatever role opened it.</Hint>
 
-          {["select", "radio", "checkbox"].includes(f.control) && (
-            <>
-              <Group>Where the choices come from</Group>
-              <Chips value={f.optionSource} onChange={(v) => set("optionSource", v)}
-                options={[["auto", "Values in that column"], ["table", "Another table"],
-                  ["list", "A list I type"]]} />
-              {f.optionSource === "table" && (
-                <Row style={{ marginTop: 8 }}>
-                  <Field label="Lookup table">
-                    <Select value={f.optTable} options={["", ...tables]}
-                      onChange={(v) => set("optTable", v)} />
-                  </Field>
-                  <Field label="Value column">
-                    <Select value={f.optColumn}
-                      options={["", ...colsOf(state.catalog, f.optTable).map((c) => c.name)]}
-                      onChange={(v) => set("optColumn", v)} />
-                  </Field>
-                </Row>
-              )}
-              {f.optionSource === "list" && (
-                <div style={{ marginTop: 8 }}>
-                  <Field label="Values — one per line">
-                    <TextArea value={f.list} placeholder={"Open\nOn hold\nClosed"}
-                      onChange={(v) => set("list", v)} />
-                  </Field>
-                </div>
-              )}
-            </>
-          )}
+          {["select", "radio", "checkbox", "status-tabs"].includes(f.control) && (
+  <>
+    <Group>
+      {f.control === "status-tabs"
+        ? "Status tab options"
+        : "Where the choices come from"}
+    </Group>
+
+    {f.control === "status-tabs" ? (
+      <>
+  <Field label="Status values — one per line">
+    <TextArea
+      value={f.list}
+      placeholder={"Pending\nApproved\nRejected\nDraft\nCancelled\nArchived"}
+      onChange={(v) => set("list", v)}
+    />
+  </Field>
+
+  <Hint>
+    These values become clickable tabs. "All" is added automatically.
+  </Hint>
+
+  <Group>Automatic archiving</Group>
+
+  <Toggles>
+    <Check
+      on={!!f.autoArchive}
+      label="Automatically archive old Pending records"
+      onChange={(v) => set("autoArchive", v)}
+    />
+  </Toggles>
+
+  {f.autoArchive && (
+    <>
+      <Row>
+        <Field label="Archive after (years)">
+          <Text
+            type="number"
+            value={f.archiveAfterYears}
+            placeholder="1"
+            onChange={(v) =>
+              set("archiveAfterYears", Math.max(1, Number(v) || 1))
+            }
+          />
+        </Field>
+
+        <Field label="Archive as">
+          <Text
+            value={f.archiveStatus}
+            placeholder="Archived"
+            onChange={(v) => set("archiveStatus", v)}
+          />
+        </Field>
+      </Row>
+
+      <Field label="Date field used for archiving">
+        <Select
+          value={f.archiveDateColumn}
+          options={[
+            "",
+            ...colsOf(state.catalog, f.table).map((c) => c.name)
+          ]}
+          onChange={(v) => set("archiveDateColumn", v)}
+        />
+      </Field>
+
+      <Hint>
+        Pending records older than the selected period will be displayed as
+        Archived. The underlying database record is not changed.
+      </Hint>
+    </>
+  )}
+</>
+    ) : (
+      <>
+        <Chips
+          value={f.optionSource}
+          onChange={(v) => set("optionSource", v)}
+          options={[
+            ["auto", "Values in that column"],
+            ["table", "Another table"],
+            ["list", "A list I type"]
+          ]}
+        />
+
+        {f.optionSource === "table" && (
+          <Row style={{ marginTop: 8 }}>
+            <Field label="Lookup table">
+              <Select
+                value={f.optTable}
+                options={["", ...tables]}
+                onChange={(v) => set("optTable", v)}
+              />
+            </Field>
+
+            <Field label="Value column">
+              <Select
+                value={f.optColumn}
+                options={[
+                  "",
+                  ...colsOf(state.catalog, f.optTable).map((c) => c.name)
+                ]}
+                onChange={(v) => set("optColumn", v)}
+              />
+            </Field>
+          </Row>
+        )}
+
+        {f.optionSource === "list" && (
+          <div style={{ marginTop: 8 }}>
+            <Field label="Values — one per line">
+              <TextArea
+                value={f.list}
+                placeholder={"Open\nOn hold\nClosed"}
+                onChange={(v) => set("list", v)}
+              />
+            </Field>
+          </div>
+        )}
+      </>
+    )}
+  </>
+)}
 
           <Group>Remove</Group>
           <DeleteButton what="this filter"

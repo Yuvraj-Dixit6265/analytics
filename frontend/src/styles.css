@@ -456,3 +456,29 @@ body.preview .help{display:none}
 .section-nav-item:hover {
   background: #f5f5f5;
 }
+
+.status-tabs-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.status-tabs-control button {
+  border: 1px solid #D5DDDA;
+  background: #fff;
+  padding: 7px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.status-tabs-control button:hover {
+  border-color: #3B5BA5;
+}
+
+.status-tabs-control button.active {
+  background: #2F3A8F;
+  color: #fff;
+  border-color: #2F3A8F;
+}

@@ -252,6 +252,16 @@ export function migrate(d) {
     f.ctrlWidth = f.ctrlWidth || "";
     f.placeholder = f.placeholder || "";
     if (!Array.isArray(f.roles)) f.roles = [];
+
+    // Defaults for newer status/archive features
+    if (f.control === "status-tabs" && !f.list) {
+      f.list = "Pending\nApproved\nRejected\nDraft\nCancelled\nArchived";
+    }
+
+    if (f.autoArchive === undefined) f.autoArchive = false;
+    if (f.archiveAfterYears === undefined) f.archiveAfterYears = 1;
+    if (f.archiveDateColumn === undefined) f.archiveDateColumn = "";
+    if (f.archiveStatus === undefined) f.archiveStatus = "Archived";
   });
   (doc.sections || []).forEach((sc) => {
     sc.style = normS(sc.style);

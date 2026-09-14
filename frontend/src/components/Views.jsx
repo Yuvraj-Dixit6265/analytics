@@ -19,9 +19,26 @@ const whenTxt = (t) => {
 
 /* ---------------- reports ---------------- */
 
-export function Reports({ onOpen, onNew, reload }) {
+export function Reports({ onOpen, onNew, onGenerate, reload }) {
   const { state, dispatch } = useStore();
   const [pendingDel, setPendingDel] = React.useState(null);
+  const [aiPrompt, setAiPrompt] = React.useState("");
+  const [aiBusy, setAiBusy] = React.useState(false);
+  const [aiError, setAiError] = React.useState("");
+
+  const runGenerate = async () => {
+    if (!aiPrompt.trim() || aiBusy) return;
+    setAiBusy(true);
+    setAiError("");
+    try {
+      await onGenerate(aiPrompt.trim());
+      setAiPrompt("");
+    } catch (e) {
+      setAiError(e.message);
+    } finally {
+      setAiBusy(false);
+    }
+  };
 
   const rename = async (r, name) => {
     if (!name.trim() || name === r.name) return;
@@ -92,6 +109,22 @@ export function Reports({ onOpen, onNew, reload }) {
       <header>
         <h2>Reports &amp; dashboards</h2>
       </header>
+
+      <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--line-soft)" }}>
+        <div className="fld" style={{ marginBottom: 8 }}>
+          <textarea
+            rows={2}
+            value={aiPrompt}
+            disabled={aiBusy}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            placeholder='Describe a report — e.g. "total sales and open invoices as boxes, a table of the top 10 vendors by spend, and a bar chart of monthly sales, filterable by status and date"'
+          />
+        </div>
+        <button className="pb go" disabled={aiBusy || !aiPrompt.trim()} onClick={runGenerate}>
+          {aiBusy ? "Generating…" : "Generate with AI"}
+        </button>
+        {aiError && <div className="fx bad" style={{ marginTop: 8 }}>{aiError}</div>}
+      </div>
 
       <div id="repList">
         {!state.reports.length && (

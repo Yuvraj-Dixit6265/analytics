@@ -98,6 +98,8 @@ const api = {
   saveProcess: (key, definition, connectionId) =>
     call(`/processes/${key}`, { method: "PUT", body: { definition, connection_id: connectionId } }),
   deleteProcess: (key) => call(`/processes/${key}`, { method: "DELETE" }),
+  aiGenerateReport: (prompt, connectionId) =>
+    call("/processes/ai-generate", { method: "POST", body: { prompt, connection_id: connectionId } }),
 
   executeAll: (key, definition, filters, signal) =>
     call(`/processes/${key}/execute-all`, {

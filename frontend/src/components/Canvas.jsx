@@ -425,6 +425,30 @@ function Control({ filter: f }) {
         </div>
       );
     }
+        case "status-tabs": {
+      const statusOptions = [
+        { value: "", label: "All" },
+        ...options.map((o) => ({
+          value: String(o.value),
+          label: o.label,
+        })),
+      ];
+
+      return (
+        <div className="status-tabs-control">
+          {statusOptions.map((o) => (
+            <button
+              key={o.value || "all"}
+              type="button"
+              className={String(value || "") === o.value ? "active" : ""}
+              onClick={() => set(o.value)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+      );
+    }
     default:
       return (
         <select value={value ?? ""} onChange={(e) => set(e.target.value)}>

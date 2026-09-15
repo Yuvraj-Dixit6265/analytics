@@ -2,7 +2,7 @@
 
    Everything is configured on the box itself. There is no separate inspector;
    selecting a box reveals its own strip and its own panel, in place. */
-
+import api from "../api";
 import React from "react";
 import { useStore } from "../store.jsx";
 import Chart, { Legend, legendItems } from "../charts/Chart.jsx";
@@ -150,6 +150,9 @@ const Placeholder = ({ msg, sub, height }) => (
 
 function Body({ box }) {
   const { state, dispatch } = useStore();
+  const [prItems, setPrItems] = React.useState(null);
+  const [prNumber, setPrNumber] = React.useState("");
+  const [prLoading, setPrLoading] = React.useState(false);
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
 
@@ -572,84 +575,289 @@ if (box.tableMode === "graph") {
     <table className="rt">
       <thead>
         <tr>
-          {shown.map((col) => {
-            const i = c.columns.indexOf(col);
+        
+              {shown.map((col) => {
+                const i = c.columns.indexOf(col);
 
-            return (
-              <th
-                key={col.col}
-                className={col.align === "right" ? "num" : undefined}
-                style={{
-                  ...styleObj(normS(c.headStyle)),
-                  ...(col.width ? { width: col.width } : {}),
-                }}
-              >
-                <Editable
-                  value={col.label}
-                  placeholder="name"
-                  onChange={(v) =>
-                    dispatch({
-                      type: "set",
-                      target: "box",
-                      id: box.id,
-                      path: `table.columns.${i}.label`,
-                      value: v,
-                    })
-                  }
-                />
-              </th>
-            );
-          })}
-        </tr>
-      </thead>
+                return (
+                  <th
+                    key={col.col}
+                    className={col.align === "right" ? "num" : undefined}
+                    style={{
+                      ...styleObj(normS(c.headStyle)),
+                      ...(col.width ? { width: col.width } : {}),
+                      position: "relative",
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+
+                      const draggedCol = e.dataTransfer.getData("text/plain");
+
+                      if (!draggedCol || draggedCol === col.col) {
+                        return;
+                      }
+
+                      const currentColumns = [...c.columns];
+
+                      const fromIndex = currentColumns.findIndex(
+                        (x) => x.col === draggedCol
+                      );
+
+                      const toIndex = currentColumns.findIndex(
+                        (x) => x.col === col.col
+                      );
+
+                      if (fromIndex === -1 || toIndex === -1) {
+                        return;
+                      }
+
+                      const [movedColumn] = currentColumns.splice(fromIndex, 1);
+
+                      currentColumns.splice(toIndex, 0, movedColumn);
+
+                      dispatch({
+                        type: "set",
+                        target: "box",
+                        id: box.id,
+                        path: "table.columns",
+                        value: currentColumns,
+                      });
+                    }}
+                  >
+                    <span
+                      draggable
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        e.dataTransfer.setData("text/plain", col.col);
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      style={{
+                        display: "inline-block",
+                        marginRight: "8px",
+                        cursor: "grab",
+                        opacity: 0.55,
+                        userSelect: "none",
+                        fontSize: "13px",
+                      }}
+                      title="Drag to move column"
+                    >
+                      ⋮⋮
+                    </span>
+
+                    <Editable
+                      value={col.label}
+                      placeholder="name"
+                      onChange={(v) =>
+                        dispatch({
+                          type: "set",
+                          target: "box",
+                          id: box.id,
+                          path: `table.columns.${i}.label`,
+                          value: v,
+                        })
+                      }
+                    />
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
 
       <tbody>
-        {rows.length ? (
-          rows.slice(0, c.limit || 10).map((r, i) => (
-            <tr key={i} className={c.zebra && i % 2 ? "z" : undefined}>
-              {shown.map((col) => (
+  {rows.length ? (
+    rows.slice(0, c.limit || 10).map((r, i) => {
+      const rowPrColumn = shown.find((col) => {
+        return (
+          String(col.col).toLowerCase() === "pr_number" ||
+          String(col.label || "").toLowerCase() === "pr number"
+        );
+      });
+
+      const rowPrNumber = rowPrColumn
+        ? r[alias(rowPrColumn.col)]
+        : null;
+
+      const isSelectedPR =
+        rowPrNumber &&
+        String(prNumber) === String(rowPrNumber) &&
+        prItems !== null;
+
+      return (
+        <React.Fragment key={i}>
+          <tr
+            className={c.zebra && i % 2 ? "z" : undefined}
+          >
+            {shown.map((col) => {
+              const value = r[alias(col.col)];
+
+              const isPrNumber =
+                String(col.col).toLowerCase() === "pr_number" ||
+                String(col.label || "").toLowerCase() === "pr number";
+
+              return (
                 <td
                   key={col.col}
-                  className={col.align === "right" ? "num" : undefined}
+                  className={
+                    col.align === "right" ? "num" : undefined
+                  }
                   style={
                     col.align === "center"
                       ? { textAlign: "center" }
                       : undefined
                   }
                 >
-                  {fmtCell(r[alias(col.col)], col.fmt, locale)}
-                </td>
-              ))}
-            </tr>
-          ))
-        ) : (
-          <>
-            {[0, 1, 2].map((i) => (
-              <tr
-                key={i}
-                className={`ghost${c.zebra && i % 2 ? " z" : ""}`}
-              >
-                {shown.map((col) => (
-                  <td
-                    key={col.col}
-                    className={col.align === "right" ? "num" : undefined}
-                  >
-                    —
-                  </td>
-                ))}
-              </tr>
-            ))}
+                  {isPrNumber && value ? (
+                    <button
+                      type="button"
+                      className="pr-link"
+                      onClick={async () => {
+                        const clickedPR = String(value);
 
-            <tr>
-              <td className="ghost-note" colSpan={shown.length}>
-                {msg} · {sub}
+                        setPrNumber(clickedPR);
+                        setPrItems([]);
+                        setPrLoading(true);
+
+                        try {
+                          const data = await api.prItems(
+                            state.processKey,
+                            value
+                          );
+
+                          setPrItems(data.rows || []);
+                        } catch (err) {
+                          console.error(
+                            "Could not load PR items:",
+                            err
+                          );
+
+                          setPrItems([]);
+                        } finally {
+                          setPrLoading(false);
+                        }
+                      }}
+                    >
+                      {fmtCell(value, col.fmt, locale)}
+                    </button>
+                  ) : (
+                    fmtCell(value, col.fmt, locale)
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+
+          {isSelectedPR && (
+            <tr className="pr-items-row">
+              <td colSpan={shown.length}>
+                <div className="pr-inline">
+                  <div className="pr-inline-header">
+                    <strong>
+                      PR Items — {prNumber}
+                    </strong>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPrItems(null);
+                        setPrNumber("");
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  {prLoading ? (
+                    <div className="pr-empty">
+                      Loading PR items...
+                    </div>
+                  ) : prItems.length === 0 ? (
+                    <div className="pr-empty">
+                      No items found for this Purchase Requisition.
+                    </div>
+                  ) : (
+                    <div className="pr-items-table-wrap">
+                      <table className="rt pr-items-table">
+                        <thead>
+                          <tr>
+                            <th>Material ID</th>
+                            <th>Quantity</th>
+                            <th>SKU</th>
+                            <th>Total Price</th>
+                            <th>UOM</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {prItems.map((item, itemIndex) => (
+                            <tr key={itemIndex}>
+                              <td>
+                                {item.material_id ?? "—"}
+                              </td>
+                              <td>
+                                {item.quantity ?? "—"}
+                              </td>
+                              <td>
+                                {item.sku ?? "—"}
+                              </td>
+                              <td>
+                                {item.total_price ?? "—"}
+                              </td>
+                              <td>
+                                {item.uom ?? "—"}
+                              </td>
+                              <td>
+                                {item.status ?? "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </td>
             </tr>
-          </>
-        )}
-      </tbody>
+          )}
+        </React.Fragment>
+      );
+    })
+  ) : (
+    <>
+      {[0, 1, 2].map((i) => (
+        <tr
+          key={i}
+          className={`ghost${c.zebra && i % 2 ? " z" : ""}`}
+        >
+          {shown.map((col) => (
+            <td
+              key={col.col}
+              className={
+                col.align === "right" ? "num" : undefined
+              }
+            >
+              —
+            </td>
+          ))}
+        </tr>
+      ))}
 
-      {c.totals && rows.length > 0 && (
+      <tr>
+        <td
+          className="ghost-note"
+          colSpan={shown.length}
+        >
+          {msg} · {sub}
+        </td>
+      </tr>
+    </>
+  )}
+</tbody>
+
+            {c.totals && rows.length > 0 && (
         <tfoot>
           <tr>
             {shown.map((col, i) => {
@@ -659,7 +867,9 @@ if (box.tableMode === "graph") {
               return (
                 <td
                   key={col.col}
-                  className={col.align === "right" ? "num" : undefined}
+                  className={
+                    col.align === "right" ? "num" : undefined
+                  }
                 >
                   {i === 0
                     ? "Total"
@@ -680,6 +890,7 @@ if (box.tableMode === "graph") {
           </tr>
         </tfoot>
       )}
+
     </table>
   );
 }

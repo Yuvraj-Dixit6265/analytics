@@ -530,21 +530,84 @@ def execute_all(key):
     row = db.q1("SELECT * FROM processes WHERE process_key=%s", (key,))
     if not row:
         return jsonify(error="no such report"), 404
+
     definition = body.get("definition") or (
         row["definition"] if isinstance(row["definition"], dict)
-        else json.loads(row["definition"]))
+        else json.loads(row["definition"])
+    )
+
     conn_row = _connection_for(row)
     if not conn_row:
         return jsonify(error="no data connection configured"), 400
+
     try:
         cat = _catalogue(conn_row)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         return jsonify(error=f"could not read the catalogue: {exc}"), 502
 
     state = body.get("filters") or {}
-    results = _execute_boxes(definition, state, conn_row, cat, allow_forms=True)
+    results = _execute_boxes(
+        definition,
+        state,
+        conn_row,
+        cat,
+        allow_forms=True
+    )
+
     return jsonify(results=results)
 
+
+# ============================================================
+# PR ITEMS
+# ============================================================
+
+@app.get("/api/processes/<key>/pr/<pr_number>/items")
+@auth()
+def get_pr_items(key, pr_number):
+    """Return the items belonging to one Purchase Requisition."""
+
+    row = db.q1(
+        "SELECT * FROM processes WHERE process_key=%s",
+        (key,),
+    )
+
+    if not row:
+        return jsonify(error="no such report"), 404
+
+    conn_row = _connection_for(row)
+
+    if not conn_row:
+        return jsonify(error="no data connection configured"), 400
+
+    sql = """
+        SELECT
+            pri.id,
+            pri.material_id,
+            pri.quantity,
+            pri.sku,
+            pri.total_price,
+            pri.uom,
+            pri.status
+        FROM purchase_requisition_items pri
+        INNER JOIN purchase_requisitions pr
+            ON pr.id = pri.purchase_requisition_id
+        WHERE pr.pr_number = %s
+        ORDER BY pri.id
+    """
+
+    try:
+        rows = db.run_report_query(
+            conn_row,
+            sql,
+            (pr_number,),
+        )
+
+        return jsonify(rows=rows)
+
+    except Exception as exc:
+        return jsonify(
+            error=f"could not load PR items: {str(exc)[:300]}"
+        ), 502
 
 @app.post("/api/processes/<key>/preview-sql")
 @auth()

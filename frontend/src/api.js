@@ -107,12 +107,20 @@ const api = {
     call(`/processes/${key}/execute-all`, {
       method: "POST", body: { definition, filters }, signal,
     }),
+  getPrItems: (key, prNumber, signal) =>
+  call(
+    `/processes/${key}/pr/${encodeURIComponent(prNumber)}/items`,
+    { signal }
+  ),
   previewSql: (key, box, definition, filters) =>
     call(`/processes/${key}/preview-sql`, {
       method: "POST", body: { box, definition, filters },
     }),
   filterOptions: (key, clientId) =>
     call(`/processes/${key}/filters/${clientId}/options`),
+
+  prItems: (key, prNumber) =>
+    call(`/processes/${key}/pr/${encodeURIComponent(prNumber)}/items`),
 
   publish: (key, roles) => call(`/processes/${key}/publish`, { method: "POST", body: { roles } }),
   unpublish: (key) => call(`/processes/${key}/unpublish`, { method: "POST" }),

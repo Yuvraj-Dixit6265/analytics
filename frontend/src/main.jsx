@@ -4,7 +4,16 @@ import App from "./App.jsx";
 import PublicView from "./components/PublicView.jsx";
 import "./styles.css";
 
-const publicMatch = window.location.pathname.match(/^\/r\/(.+)$/);
+const base = import.meta.env.BASE_URL || "/";
+const pathname = window.location.pathname;
+
+const relativePath =
+  base !== "/" && pathname.startsWith(base)
+    ? "/" + pathname.slice(base.length)
+    : pathname;
+
+const publicMatch = relativePath.match(/^\/r\/(.+)$/);
+
 const root = createRoot(document.getElementById("root"));
 
 root.render(

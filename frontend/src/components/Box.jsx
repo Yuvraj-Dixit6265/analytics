@@ -198,91 +198,229 @@ function Body({ box }) {
   }
 
   if (box.kind === "chart") {
-  const c = box.chart;
+  const c = box.chart || {};
 
-  let data = [];
+  let data = result?.data || [];
 
   /*
-   * ----------------------------------------------------------
-   * VALUE BOX SOURCE
-   * ----------------------------------------------------------
+   * TABLE -> GRAPH
    */
+  if (c.source === "table" && c.tableBoxId) {
+    const tableBox = state.doc.sections
+      .flatMap((section) => section.boxes || [])
+      .find((b) => b.id === c.tableBoxId);
 
-  if (c.source === "value_boxes") {
-    const selected = c.valueBoxes || [];
+    if (tableBox) {
+      const categoryId =
+        c.tableCategoryColumnId;
 
-    const allValueBoxes = state.doc.sections
-      .flatMap((section) => section.boxes || []);
+      const valueId =
+        c.tableValueColumnId;
 
-    data = selected
-      .map((id) => {
-        const valueBox = allValueBoxes.find(
-          (b) => b.id === id
-        );
+      if (tableBox.tableMode === "manual") {
+        const columns =
+          tableBox.manualTable?.columns || [];
 
-        if (!valueBox) return null;
+        const categoryIndex =
+          columns.findIndex(
+            (col) => col.id === categoryId
+          );
 
-        const valueResult =
-          state.results[valueBox.id];
+        const valueIndex =
+          columns.findIndex(
+            (col) => col.id === valueId
+          );
 
-        let value;
-
+        if (
+          categoryIndex >= 0 &&
+          valueIndex >= 0
+        ) {
+          data = (
+            tableBox.manualTable?.rows || []
+          )
+            .map((row) => ({
+              label:
+                row.cells?.[categoryIndex] || "",
+              value:
+                Number(
+                  row.cells?.[valueIndex]
+                ) || 0,
+            }))
+            .filter(
+              (row) => row.label !== ""
+            );
+        }
+      } else {
         /*
-         * Manual value
+         * Database table
          */
-        if (valueBox.value?.source === "manual") {
-          value = Number(valueBox.value.manual);
-        } else {
-          value = Number(valueResult?.value);
+        const columns =
+          tableBox.table?.columns || [];
+
+        const categoryColumn =
+          columns.find(
+            (col) => col.col === categoryId
+          );
+
+        const valueColumn =
+          columns.find(
+            (col) => col.col === valueId
+          );
+
+        const tableResult =
+          state.results[tableBox.id];
+
+        if (
+          categoryColumn &&
+          valueColumn &&
+          tableResult?.rows
+        ) {
+          data = tableResult.rows
+            .map((row) => ({
+              label:
+                row[categoryColumn.col] ?? "",
+              value:
+                Number(
+                  row[valueColumn.col]
+                ) || 0,
+            }))
+            .filter(
+              (row) => row.label !== ""
+            );
         }
+      }
 
-        if (!Number.isFinite(value)) {
-          value = 0;
-        }
+      /*
+       * Sort using the chart settings.
+       */
+      if (c.sort === "value") {
+        data.sort((a, b) =>
+          c.dir === "asc"
+            ? a.value - b.value
+            : b.value - a.value
+        );
+      } else {
+        data.sort((a, b) =>
+          c.dir === "asc"
+            ? String(a.label).localeCompare(
+                String(b.label)
+              )
+            : String(b.label).localeCompare(
+                String(a.label)
+              )
+        );
+      }
 
-        return {
-          label: valueBox.title || "Unnamed value",
-          value,
-        };
-      })
-      .filter(Boolean);
-  }
-
-  /*
-   * ----------------------------------------------------------
-   * NORMAL DATABASE CHART
-   * ----------------------------------------------------------
-   */
-
-  else {
-    data = result?.data || [];
-  }
-
-  /*
-   * ----------------------------------------------------------
-   * EMPTY STATE
-   * ----------------------------------------------------------
-   */
-    if (!data.length) {
-      const [msg, sub] = stateNote(box, state.catalog);
-      const label = (CHARTS.find((x) => x[0] === c.type) || ["", "Chart"])[1];
-      return <Placeholder msg={`${label} · ${msg}`} sub={sub} height={c.height || 220} />;
+      if (Number(c.limit) > 0) {
+        data = data.slice(
+          0,
+          Number(c.limit)
+        );
+      }
     }
-    const pos = c.legendPos || "bottom";
+  }
+
+  if (!data.length) {
+    const [msg, sub] =
+      stateNote(box, state.catalog);
+
+    const label =
+      (
+        CHARTS.find(
+          (x) => x[0] === c.type
+        ) || ["", "Chart"]
+      )[1];
+
     return (
-      <div className={`chartwrap lp-${pos}`}>
-        <div className="chartsvg"><Chart data={data} cfg={c} /></div>
-        {c.legend && (
-          <Legend
-            items={legendItems(data, c)}
-            position={pos}
-            showValues={c.type === "donut"}
-          />
-        )}
+      <Placeholder
+        msg={`${label} · ${msg}`}
+        sub={sub}
+        height={c.height || 220}
+      />
+    );
+  }
+
+  const pos =
+    c.legendPos || "bottom";
+
+  return (
+    <div className={`chartwrap lp-${pos}`}>
+      <div className="chartsvg">
+        <Chart
+          data={data}
+          cfg={c}
+        />
+      </div>
+
+      {c.legend && (
+        <Legend
+          items={legendItems(data, c)}
+          position={pos}
+          showValues={c.type === "donut"}
+        />
+      )}
+    </div>
+  );
+}
+/* GRAPH TABLE */
+if (box.tableMode === "graph") {
+  const graphBox = state.doc.sections
+    .flatMap((section) => section.boxes || [])
+    .find((b) => b.id === box.table?.graphBoxId);
+
+  const graphData = graphBox
+    ? state.results[graphBox.id]?.data || []
+    : [];
+
+  if (!graphBox) {
+    return (
+      <div className="empty">
+        Select a graph in <b>⚙ Set up</b>.
       </div>
     );
   }
 
+  if (!graphData.length) {
+    return (
+      <div className="empty">
+        Waiting for graph data.
+      </div>
+    );
+  }
+
+  const rows = graphData.slice(0, box.table?.limit || 10);
+
+  return (
+    <table className="rt">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th className="num">Value</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {rows.map((row, i) => (
+          <tr
+            key={i}
+            className={
+              box.table?.zebra && i % 2 ? "z" : undefined
+            }
+          >
+            <td>{row.label}</td>
+            <td className="num">
+              {fmtNumber(
+                row.value,
+                0,
+                locale
+              )}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
     /* table */
   if (box.tableMode === "manual") {
     const t = box.manualTable;
@@ -599,13 +737,18 @@ function Panel({ box, cols }) {
                 value={box.tableMode || "data"}
                 options={[
                   ["data", "Data table"],
+                  ["graph", "Graph table"],
                   ["manual", "Manual table"],
                 ]}
                 onChange={(v) => set("tableMode", v)}
               />
 
-              {box.tableMode !== "manual" && (
+              {box.tableMode === "data" && (
                 <TableData box={box} set={set} />
+              )}
+
+              {box.tableMode === "graph" && (
+                <GraphTableData box={box} set={set} />
               )}
 
               {box.tableMode === "manual" && (
@@ -654,13 +797,18 @@ function Panel({ box, cols }) {
                 value={box.tableMode || "data"}
                 options={[
                   ["data", "Data table"],
+                  ["graph", "Graph table"],
                   ["manual", "Manual table"],
                 ]}
                 onChange={(v) => set("tableMode", v)}
               />
 
-              {box.tableMode !== "manual" && (
+              {box.tableMode === "data" && (
                 <TableData box={box} set={set} />
+              )}
+
+              {box.tableMode === "graph" && (
+                <GraphTableData box={box} set={set} />
               )}
 
               {box.tableMode === "manual" && (
@@ -818,19 +966,16 @@ function ValueFormat({ box, set }) {
 
 /* ---- chart ---- */
 function ChartData({ box, set }) {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
   const c = box.chart || {};
 
   const cols = colOptions(state.catalog, box.src).map((x) => x.name);
 
   /*
-   * Every Value box in the report except the current Graph box.
-   *
-   * IMPORTANT:
-   * The value stored in chart.valueBoxes is the BOX ID.
-   * The title is only for display.
+   * Tables available inside this report.
+   * A graph can use either a database query or another table box.
    */
-  const valueBoxes = state.doc.sections
+  const tableBoxes = state.doc.sections
     .flatMap((section) =>
       (section.boxes || []).map((b) => ({
         ...b,
@@ -839,49 +984,27 @@ function ChartData({ box, set }) {
     )
     .filter(
       (b) =>
-        b.kind === "value" &&
+        b.kind === "table" &&
         b.id !== box.id
     );
 
-  const selectedValueBoxes = Array.isArray(c.valueBoxes)
-    ? c.valueBoxes
+  const selectedTable = tableBoxes.find(
+    (t) => t.id === c.tableBoxId
+  );
+
+  const tableColumns = selectedTable
+    ? selectedTable.tableMode === "manual"
+      ? (selectedTable.manualTable?.columns || []).map((col) => ({
+          id: col.id,
+          label: col.label || "Untitled",
+        }))
+      : (selectedTable.table?.columns || [])
+          .filter((col) => col.on !== false)
+          .map((col) => ({
+            id: col.col,
+            label: col.label || col.col || "Untitled",
+          }))
     : [];
-
-  const toggleValueBox = (id) => {
-    const next = selectedValueBoxes.includes(id)
-      ? selectedValueBoxes.filter((x) => x !== id)
-      : [...selectedValueBoxes, id];
-
-    set("chart.valueBoxes", next);
-  };
-
-  const getBoxValue = (b) => {
-    if (b.value?.source === "manual") {
-      const n = Number(b.value.manual);
-      return Number.isFinite(n) ? n : null;
-    }
-
-    const result = state.results[b.id];
-
-    const n = Number(result?.value);
-
-    return Number.isFinite(n) ? n : null;
-  };
-
-  const formatBoxValue = (b) => {
-    const value = getBoxValue(b);
-
-    if (value === null) return "—";
-
-    const decimals = Number.isInteger(b.value?.decimals)
-      ? b.value.decimals
-      : 0;
-
-    const suffix = b.value?.suffix || "";
-    const prefix = b.value?.prefix || "";
-
-    return `${prefix}${value.toFixed(decimals)}${suffix}`;
-  };
 
   return (
     <>
@@ -892,6 +1015,7 @@ function ChartData({ box, set }) {
         options={CHARTS}
         onChange={(v) => set("chart.type", v)}
       />
+      
 
       <Row style={{ marginTop: 9 }}>
         <Field label="Data source">
@@ -900,19 +1024,94 @@ function ChartData({ box, set }) {
             options={[
               ["database", "Query data"],
               ["value_boxes", "Value boxes"],
+              ["table", "Table data"],
             ]}
             onChange={(v) => set("chart.source", v)}
           />
         </Field>
       </Row>
 
-      {c.source === "value_boxes" ? (
+      {/* ======================================================
+          TABLE DATA SOURCE
+         ====================================================== */}
+      {c.source === "table" ? (
+        <>
+          <Group>Source table</Group>
+
+          <Field label="Table">
+            <Select
+              value={c.tableBoxId || ""}
+              options={[
+                ["", "Select a table"],
+                ...tableBoxes.map((t) => [
+                  t.id,
+                  `${t.title || "Untitled table"} · ${t.sectionName}`,
+                ]),
+              ]}
+              onChange={(v) => {
+                set("chart.tableBoxId", v);
+                set("chart.tableCategoryColumnId", "");
+                set("chart.tableValueColumnId", "");
+              }}
+            />
+          </Field>
+
+          {selectedTable && (
+            <>
+              <Row style={{ marginTop: 9 }}>
+                <Field label="Category column">
+                  <Select
+                    value={c.tableCategoryColumnId || ""}
+                    options={[
+                      ["", "Select category"],
+                      ...tableColumns.map((col) => [
+                        col.id,
+                        col.label,
+                      ]),
+                    ]}
+                    onChange={(v) =>
+                      set(
+                        "chart.tableCategoryColumnId",
+                        v
+                      )
+                    }
+                  />
+                </Field>
+
+                <Field label="Value column">
+                  <Select
+                    value={c.tableValueColumnId || ""}
+                    options={[
+                      ["", "Select value"],
+                      ...tableColumns.map((col) => [
+                        col.id,
+                        col.label,
+                      ]),
+                    ]}
+                    onChange={(v) =>
+                      set(
+                        "chart.tableValueColumnId",
+                        v
+                      )
+                    }
+                  />
+                </Field>
+              </Row>
+
+              <Hint>
+                The graph reads the rows from this table.
+                Add or edit rows in the table and the graph updates automatically.
+              </Hint>
+            </>
+          )}
+        </>
+      ) : c.source === "value_boxes" ? (
         <>
           <Group>Value boxes</Group>
 
           <Hint>
-            Select the existing Value boxes that should become
-            the chart's categories.
+            Select existing Value boxes that should become
+            chart categories.
           </Hint>
 
           <div
@@ -923,84 +1122,57 @@ function ChartData({ box, set }) {
               gap: 7,
             }}
           >
-            {valueBoxes.length === 0 ? (
-              <Hint>No Value boxes available.</Hint>
-            ) : (
-              valueBoxes.map((b) => {
-                const checked =
-                  selectedValueBoxes.includes(b.id);
+            {state.doc.sections
+              .flatMap((section) => section.boxes || [])
+              .filter(
+                (b) =>
+                  b.kind === "value" &&
+                  b.id !== box.id
+              )
+              .map((b) => (
+                <label
+                  key={b.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={
+                      Array.isArray(c.valueBoxes) &&
+                      c.valueBoxes.includes(b.id)
+                    }
+                    onChange={() => {
+                      const current =
+                        Array.isArray(c.valueBoxes)
+                          ? c.valueBoxes
+                          : [];
 
-                return (
-                  <label
-                    key={b.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: 8,
-                      cursor: "pointer",
+                      const next =
+                        current.includes(b.id)
+                          ? current.filter(
+                              (x) => x !== b.id
+                            )
+                          : [...current, b.id];
+
+                      set(
+                        "chart.valueBoxes",
+                        next
+                      );
                     }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleValueBox(b.id)}
-                    />
+                  />
 
-                    <span>
-                      <b>
-                        {b.title || "Unnamed value"}
-                      </b>
-
-                      <span
-                        style={{
-                          display: "block",
-                          fontSize: 11,
-                          color: "#6B7A78",
-                        }}
-                      >
-                        {formatBoxValue(b)}
-                        {" · "}
-                        {b.sectionName}
-                        {" · "}
-                        {b.id}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })
-            )}
+                  {b.title || "Unnamed value"}
+                </label>
+              ))}
           </div>
-
-          {selectedValueBoxes.length > 0 && (
-            <Hint style={{ marginTop: 8 }}>
-              <b>
-                {selectedValueBoxes.length} Value box
-                {selectedValueBoxes.length > 1 ? "es" : ""} selected:
-              </b>
-
-            <div style={{ marginTop: 6 }}>
-              {selectedValueBoxes.map((id) => {
-                const b = valueBoxes.find((x) => x.id === id);
-
-                return (
-                  <div key={id}>
-                    • {b?.title || "Unnamed value box"}
-                    {b && (
-                      <span style={{ fontSize: 11, color: "#6B7A78" }}>
-                        {" · "}
-                        {formatBoxValue(b)}
-                        {" · "}
-                        {b.sectionName}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </Hint>
-        )}
         </>
       ) : (
+        /* ======================================================
+           EXISTING DATABASE CHART
+           ====================================================== */
         <>
           <Row style={{ marginTop: 9 }}>
             <Field label="Group by">
@@ -1125,7 +1297,63 @@ function ChartFormat({ box, set }) {
     </>
   );
 }
+/* ---- graph table ---- */
+function GraphTableData({ box, set }) {
+  const { state } = useStore();
+  const c = box.table || {};
 
+  const graphBoxes = state.doc.sections
+    .flatMap((section) =>
+      (section.boxes || []).map((b) => ({
+        ...b,
+        sectionName: section.name || "Unnamed section",
+      }))
+    )
+    .filter(
+      (b) =>
+        b.kind === "chart" &&
+        b.id !== box.id
+    );
+
+  return (
+    <>
+      <Group>Graph source</Group>
+
+      <Field label="Graph">
+        <Select
+          value={c.graphBoxId || ""}
+          options={[
+            ["", "Select a graph"],
+            ...graphBoxes.map((g) => [
+              g.id,
+              `${g.title || "Untitled graph"} · ${g.sectionName}`,
+            ]),
+          ]}
+          onChange={(v) => set("table.graphBoxId", v)}
+        />
+      </Field>
+
+      {c.graphBoxId && (
+        <Hint>
+          This table reads the selected graph's data automatically.
+        </Hint>
+      )}
+
+      <Group>Rows</Group>
+
+      <Row>
+        <Field label="Rows">
+          <Select
+            value={c.limit || 10}
+            numeric
+            options={[5, 8, 10, 15, 25, 50]}
+            onChange={(v) => set("table.limit", v)}
+          />
+        </Field>
+      </Row>
+    </>
+  );
+}
 /* ---- table ---- */
 function TableData({ box, set }) {
   const { state, dispatch } = useStore();

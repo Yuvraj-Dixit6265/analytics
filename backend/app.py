@@ -5,6 +5,8 @@ SQL, runs it read-only, evaluates any formula, and returns finished values.
 The browser never receives a row it is not entitled to, which is what makes a
 role-scoped link meaningful rather than decorative.
 """
+from dotenv import load_dotenv
+load_dotenv()
 
 import base64
 import json
@@ -25,6 +27,7 @@ from werkzeug.security import check_password_hash
 import db
 import exporters
 import formula
+import ai_report
 from querybuilder import BadDefinition, build, build_write, preview
 
 class _SafeJSONProvider(DefaultJSONProvider):
@@ -271,6 +274,30 @@ def save_process(key):
 def delete_process(key):
     db.execute("DELETE FROM processes WHERE process_key=%s", (key,))
     return jsonify(ok=True)
+
+
+@app.post("/api/processes/ai-generate")
+@auth()
+def ai_generate_process():
+    """Describe a report in plain English; get back a definition in the same
+    shape the designer itself produces. Nothing is saved here — the browser
+    creates the process the normal way, exactly like clicking New."""
+    b = request.get_json(silent=True) or {}
+    prompt = (b.get("prompt") or "").strip()
+    conn_row = _connection_for(cid=b.get("connection_id"))
+    if not conn_row:
+        return jsonify(error="No data connection configured yet. Add one in "
+                             "System Settings first."), 400
+    try:
+        tables = db.introspect(conn_row)
+        catalogue = db.catalogue_index(tables)
+        definition = ai_report.generate_definition(prompt, tables)
+        ai_report.validate_definition(definition, catalogue)
+    except ai_report.SpecError as exc:
+        return jsonify(error=str(exc)), 422
+    except requests.RequestException as exc:
+        return jsonify(error=f"Could not reach the AI service: {exc}"), 502
+    return jsonify(definition=definition, connection_id=conn_row["id"])
 
 
 # --------------------------------------------------------------------------

@@ -24,7 +24,7 @@ export const AGGS = ["SUM", "AVG", "COUNT", "COUNT DISTINCT", "MIN", "MAX"];
 export const JOIN_TYPES = [["INNER", "INNER JOIN"], ["LEFT", "LEFT JOIN"]];
 export const OPS = [["=", "="], ["<>", "≠"], [">", ">"], [">=", "≥"], ["<", "<"], ["<=", "≤"],
   ["contains", "contains"], ["starts", "starts with"], ["in", "in list"],
-  ["blank", "is blank"], ["notblank", "is not blank"]];
+  ["blank", "is blank"], ["null", "is null"], ["notblank", "is not blank"]];
 export const CHARTS = [
   ["bar", "Bar"],
   ["hbar", "Bars →"],
@@ -36,7 +36,7 @@ export const CHARTS = [
 ];
 export const CONTROLS = [["text", "Text box"], ["date", "Date"], ["daterange", "Date range"],
   ["select", "Dropdown"], ["radio", "Option buttons"], ["checkbox", "Check boxes"],
-  ["toggle", "Yes / No"], ["number", "Number"]];
+  ["toggle", "Yes / No"], ["number", "Number"], ["status-tabs", "Status tabs"]];
 export const LABEL_POS = [["top", "Above"], ["left", "Left"], ["right", "Right"], ["hidden", "Hidden"]];
 export const FWIDTHS = [["narrow", "S"], ["auto", "M"], ["wide", "L"], ["full", "Full row"]];
 export const FMTS = [["auto", "Auto"], ["text", "Text"], ["number", "Number"],
@@ -81,7 +81,14 @@ export const blankDoc = () => ({
 
 export const newFilter = (table = "") => ({
   id: uid("flt"), label: "", control: "text", table, column: "",
-  optionSource: "list", optTable: "", optColumn: "", list: "", value: "",
+  optionSource: "list", optTable: "", optColumn: "",
+  list: "Pending\nApproved\nRejected\nDraft\nCancelled\nArchived",
+  value: "",
+
+    autoArchive: false,
+    archiveAfterYears: 1,
+    archiveDateColumn: "",
+    archiveStatus: "Archived",
   visible: true, labelPos: "left", colon: true, width: "auto",
   labelWidth: "", ctrlWidth: "", gap: 8, placeholder: "",
   style: S(), ctrlStyle: S(), roles: [],
@@ -116,6 +123,10 @@ export function ensureConfigs(b) {
   // Value-box based charts
   valueBoxes: [],
 
+  tableBoxId: "",
+  tableCategoryColumnId: "",
+  tableValueColumnId: "",
+
   legendPos: "bottom",
   limit: 8,
   sort: "value",
@@ -127,7 +138,14 @@ export function ensureConfigs(b) {
   palette: 0,
 };
   if (!b.table) b.table = {
-    columns: [], limit: 8, sort: "", dir: "asc", zebra: true, totals: false, headStyle: S(),
+    columns: [],
+    limit: 8,
+    sort: "",
+    dir: "asc",
+    zebra: true,
+    totals: false,
+    headStyle: S(),
+    graphBoxId: "",
   };
   if (!b.manualTable) b.manualTable = {
   columns: [
@@ -234,6 +252,16 @@ export function migrate(d) {
     f.ctrlWidth = f.ctrlWidth || "";
     f.placeholder = f.placeholder || "";
     if (!Array.isArray(f.roles)) f.roles = [];
+
+    // Defaults for newer status/archive features
+    if (f.control === "status-tabs" && !f.list) {
+      f.list = "Pending\nApproved\nRejected\nDraft\nCancelled\nArchived";
+    }
+
+    if (f.autoArchive === undefined) f.autoArchive = false;
+    if (f.archiveAfterYears === undefined) f.archiveAfterYears = 1;
+    if (f.archiveDateColumn === undefined) f.archiveDateColumn = "";
+    if (f.archiveStatus === undefined) f.archiveStatus = "Archived";
   });
   (doc.sections || []).forEach((sc) => {
     sc.style = normS(sc.style);

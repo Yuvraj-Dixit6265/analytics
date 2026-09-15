@@ -497,58 +497,92 @@ function PublicBoxBody({ box }) {
   }
 
   if (box.kind === "chart") {
-  let data = [];
+  const c = box.chart || {};
 
-  /*
-   * VALUE BOX SOURCE
-   *
-   * Build chart data from the Value boxes selected
-   * in the chart configuration.
-   */
-  if (box.chart?.source === "value_boxes") {
-    const selected = box.chart?.valueBoxes || [];
+  let data = result?.data || [];
 
-    const allValueBoxes = state.doc.sections
-      .flatMap((section) => section.boxes || []);
+  if (c.source === "table" && c.tableBoxId) {
+    const tableBox = state.doc.sections
+      .flatMap((section) => section.boxes || [])
+      .find((b) => b.id === c.tableBoxId);
 
-    data = selected
-      .map((id) => {
-        const valueBox = allValueBoxes.find(
-          (b) => b.id === id
-        );
+    if (tableBox) {
+      const categoryId =
+        c.tableCategoryColumnId;
 
-        if (!valueBox) return null;
+      const valueId =
+        c.tableValueColumnId;
 
-        const valueResult = state.results[valueBox.id];
+      if (tableBox.tableMode === "manual") {
+        const columns =
+          tableBox.manualTable?.columns || [];
 
-        let value;
+        const categoryIndex =
+          columns.findIndex(
+            (col) => col.id === categoryId
+          );
 
-        /*
-         * Manual value
-         */
-        if (valueBox.value?.source === "manual") {
-          value = Number(valueBox.value.manual);
-        } else {
-          value = Number(valueResult?.value);
+        const valueIndex =
+          columns.findIndex(
+            (col) => col.id === valueId
+          );
+
+        if (
+          categoryIndex >= 0 &&
+          valueIndex >= 0
+        ) {
+          data = (
+            tableBox.manualTable?.rows || []
+          )
+            .map((row) => ({
+              label:
+                row.cells?.[categoryIndex] || "",
+              value:
+                Number(
+                  row.cells?.[valueIndex]
+                ) || 0,
+            }))
+            .filter(
+              (row) => row.label !== ""
+            );
         }
+      } else {
+        const columns =
+          tableBox.table?.columns || [];
 
-        if (!Number.isFinite(value)) {
-          value = 0;
+        const categoryColumn =
+          columns.find(
+            (col) => col.col === categoryId
+          );
+
+        const valueColumn =
+          columns.find(
+            (col) => col.col === valueId
+          );
+
+        const tableResult =
+          state.results[tableBox.id];
+
+        if (
+          categoryColumn &&
+          valueColumn &&
+          tableResult?.rows
+        ) {
+          data = tableResult.rows
+            .map((row) => ({
+              label:
+                row[categoryColumn.col] ?? "",
+              value:
+                Number(
+                  row[valueColumn.col]
+                ) || 0,
+            }))
+            .filter(
+              (row) => row.label !== ""
+            );
         }
-
-        return {
-          label: valueBox.title || "Unnamed value",
-          value,
-        };
-      })
-      .filter(Boolean);
-  }
-
-  /*
-   * NORMAL DATABASE CHART
-   */
-  else {
-    data = result?.data || [];
+      }
+    }
   }
 
   if (!data.length) {
@@ -562,7 +596,10 @@ function PublicBoxBody({ box }) {
   return (
     <div className="chartwrap">
       <div className="chartsvg">
-        <Chart data={data} cfg={box.chart} />
+        <Chart
+          data={data}
+          cfg={box.chart}
+        />
       </div>
     </div>
   );

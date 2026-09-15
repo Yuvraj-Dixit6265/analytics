@@ -198,6 +198,14 @@ function Shell() {
     dispatch({ type: "open", doc, key: r.process_key, connectionId: state.connectionId });
   };
 
+  const generateReport = async (prompt) => {
+    const { definition, connection_id } = await api.aiGenerateReport(prompt, state.connectionId);
+    const doc = migrate(definition);
+    const r = await api.createProcess(doc, connection_id);
+    await reloadReports();
+    dispatch({ type: "open", doc, key: r.process_key, connectionId: connection_id });
+  };
+
   const save = async () => {
     if (!state.processKey) return;
     await api.saveProcess(state.processKey, state.doc, state.connectionId);
@@ -405,7 +413,7 @@ function Shell() {
       {state.error && <div className="fx bad" style={{ marginBottom: 14 }}>{state.error}</div>}
 
       {state.view === "reports" && (
-        <Reports onOpen={openReport} onNew={newReport} reload={reloadReports} />
+        <Reports onOpen={openReport} onNew={newReport} onGenerate={generateReport} reload={reloadReports} />
       )}
       {state.view === "settings" && <Settings reloadCatalog={reloadCatalog} />}
       {editing && <Canvas />}

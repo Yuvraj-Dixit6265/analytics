@@ -340,7 +340,7 @@ function BuilderSourceEditor({ box, set }) {
 
       <Group>Where — conditions you set</Group>
       {(src.where || []).map((c, i) => {
-        const needsVal = !["blank", "notblank"].includes(c.op);
+        const needsVal = !["blank", "notblank", "null", "notnull"].includes(c.op);
         return (
           <div className="wherow" key={i}>
             {i === 0 ? <span className="eq">WHERE</span> : (

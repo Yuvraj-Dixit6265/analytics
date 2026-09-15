@@ -127,8 +127,16 @@ def _condition(scope, col_sql, op, value, params):
     """One WHERE fragment. Values are bound, never interpolated."""
     if op == "blank":
         return f"{col_sql} IS NULL OR {col_sql} = ''"
+
     if op == "notblank":
         return f"{col_sql} IS NOT NULL AND {col_sql} <> ''"
+
+    if op == "null":
+        return f"{col_sql} IS NULL"
+
+    if op == "notnull":
+        return f"{col_sql} IS NOT NULL"
+
     if value in (None, ""):
         return None
     if op == "contains":
@@ -167,46 +175,130 @@ def _own_where(scope, src, params):
 def filter_conditions(scope, filters, state, role_row, params):
     """Conditions contributed by the filter bar.
 
-    A filter marked *driven by role* takes its value from the role row and
-    ignores whatever the request sent. That lock is what makes a role-scoped
-    link mean something rather than being decorative.
+    Supports logical auto-archiving:
+      Pending + older than archiveAfterYears -> treated as Archived.
+
+    No database rows are modified.
     """
     parts = []
+
     for f in filters or []:
         ref = f.get("column")
         if not ref or not scope.has(ref):
-            continue  # this box's tables do not carry that column
+            continue
+
         col_sql = scope.col(ref)
         control = f.get("control") or "select"
 
+        # --------------------------------------------------------------
+        # Automatic archive
+        # --------------------------------------------------------------
+        auto_archive = bool(f.get("autoArchive"))
+        archive_date_ref = f.get("archiveDateColumn")
+        archive_status = (f.get("archiveStatus") or "Archived").strip()
+        archive_years = f.get("archiveAfterYears", 1)
+
+        try:
+            archive_years = max(1, int(archive_years))
+        except (TypeError, ValueError):
+            archive_years = 1
+
+        archive_date_sql = None
+        if auto_archive and archive_date_ref and scope.has(archive_date_ref):
+            archive_date_sql = scope.col(archive_date_ref)
+
+        # --------------------------------------------------------------
+        # Role-bound filter
+        # --------------------------------------------------------------
         if f.get("role_bound") and role_row is not None:
             value = role_row.get(f.get("role_column") or "")
             if value in (None, ""):
                 continue
+
+            # If this is an auto-archive status filter, translate the
+            # requested Archived/Pending view logically.
+            if auto_archive and archive_date_sql:
+                if str(value).strip().lower() == archive_status.lower():
+                    parts.append(
+                        f"({col_sql} = %s AND "
+                        f"{archive_date_sql} < DATE_SUB(CURDATE(), "
+                        f"INTERVAL {archive_years} YEAR))"
+                    )
+                    params.append("Pending")
+                    continue
+
+                if str(value).strip().lower() == "pending":
+                    parts.append(
+                        f"({col_sql} = %s AND "
+                        f"{archive_date_sql} >= DATE_SUB(CURDATE(), "
+                        f"INTERVAL {archive_years} YEAR))"
+                    )
+                    params.append("Pending")
+                    continue
+
             params.append(value)
             parts.append(f"{col_sql} = %s")
             continue
 
         value = (state or {}).get(f.get("id") or f.get("client_id"))
+
         if value in (None, "", [], {}):
             continue
 
+        # --------------------------------------------------------------
+        # Status-tab auto archive
+        # --------------------------------------------------------------
+        if (
+            auto_archive
+            and archive_date_sql
+            and control == "status-tabs"
+        ):
+            selected = str(value).strip()
+
+            if selected.lower() == archive_status.lower():
+                params.append("Pending")
+                parts.append(
+                    f"({col_sql} = %s AND "
+                    f"{archive_date_sql} < DATE_SUB(CURDATE(), "
+                    f"INTERVAL {archive_years} YEAR))"
+                )
+                continue
+
+            if selected.lower() == "pending":
+                params.append("Pending")
+                parts.append(
+                    f"({col_sql} = %s AND "
+                    f"{archive_date_sql} >= DATE_SUB(CURDATE(), "
+                    f"INTERVAL {archive_years} YEAR))"
+                )
+                continue
+
+        # --------------------------------------------------------------
+        # Normal filters
+        # --------------------------------------------------------------
         if control == "daterange" and isinstance(value, dict):
             if value.get("from"):
                 params.append(value["from"])
                 parts.append(f"{col_sql} >= %s")
+
             if value.get("to"):
                 params.append(value["to"])
                 parts.append(f"{col_sql} <= %s")
+
         elif control == "checkbox" and isinstance(value, list):
             params.extend(value)
-            parts.append(f"{col_sql} IN ({', '.join(['%s'] * len(value))})")
+            parts.append(
+                f"{col_sql} IN ({', '.join(['%s'] * len(value))})"
+            )
+
         elif control == "text":
             params.append(f"%{value}%")
             parts.append(f"{col_sql} LIKE %s")
+
         else:
             params.append(value)
             parts.append(f"{col_sql} = %s")
+
     return parts
 
 def _raw_select(sql, filters, state, params):

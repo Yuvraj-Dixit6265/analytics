@@ -86,7 +86,7 @@ function SectionNav() {
           onMouseDown={(e) => e.stopPropagation()}
           onClick={() => scrollToSection(section.id)}
         >
-          {section.name || "Untitled Section"}
+          {section.name}
         </button>
       ))}
     </div>
@@ -222,7 +222,11 @@ function SectionNavigation() {
   const { state } = useStore();
 
   const sections = (state.doc.sections || [])
-    .filter((section) => section.visible !== false);
+  .filter((section) => section.visible !== false)
+  .filter((section) => {
+    const name = String(section.name || "").trim();
+    return !/^untitled section$/i.test(name);
+  });
 
   if (!sections.length) return null;
 
@@ -725,8 +729,10 @@ function Section({ section: sc, index }) {
   const pending = state.pendingDel?.kind === "section" && state.pendingDel.id === sc.id;
   const design = state.mode === "design";
   const nst = normS(sc.style), dst = normS(sc.descStyle);
-  const nameOff = sc.nameVisible === false;
-  const subOff = sc.subVisible === false;
+  const hasSectionName = String(sc.name || "").trim().length > 0;
+
+const nameOff = sc.nameVisible === false || !hasSectionName;
+const subOff = sc.subVisible === false || !hasSectionName;
   const cols = Math.max(1, Math.min(12, Number(sc.cols) || 4));
   const set = (path, value) => dispatch({ type: "set", target: "section", id: sc.id, path, value });
 
@@ -765,18 +771,37 @@ function Section({ section: sc, index }) {
 
       {design && <div className="secidx">Section {String(index).padStart(2, "0")}</div>}
 
-      <div className={`sec-head${nameOff ? " lbl-hidden" : ""}`}
+      {hasSectionName && (
+      <div
+        className="sec-head"
         style={nst.align ? {
-          justifyContent: nst.align === "center" ? "center"
-            : nst.align === "right" ? "flex-end" : "flex-start",
-        } : undefined}>
-        <Editable className="sec-name" value={sc.name} placeholder="Untitled section"
-          style={styleObj(nst, { align: true })} onChange={(v) => set("name", v)} />
+          justifyContent:
+            nst.align === "center"
+              ? "center"
+              : nst.align === "right"
+              ? "flex-end"
+              : "flex-start",
+        } : undefined}
+      >
+        <Editable
+          className="sec-name"
+          value={sc.name}
+          placeholder={design ? "Untitled section" : ""}
+          style={styleObj(nst, { align: true })}
+          onChange={(v) => set("name", v)}
+        />
       </div>
+    )}
       {sc.rule !== false && !nameOff && <div className="sec-rule" style={ruleStyle} />}
-      <Editable className={`sec-desc${subOff ? " lbl-hidden" : ""}`} value={sc.desc}
-        placeholder="Sub-heading" style={styleObj(dst, { align: true })}
-        onChange={(v) => set("desc", v)} />
+      {hasSectionName && (
+        <Editable
+          className={`sec-desc${subOff ? " lbl-hidden" : ""}`}
+          value={sc.desc}
+          placeholder="Sub-heading"
+          style={styleObj(dst, { align: true })}
+          onChange={(v) => set("desc", v)}
+        />
+      )}
 
       {selected && state.cfgOpen && design && <SectionPanel section={sc} />}
 

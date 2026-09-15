@@ -19,6 +19,48 @@ const ROLE_OPTIONS = [
   { value: "employee", label: "Employee" },
 ];
 
+/* A small "Edit with AI" box shown above the Canvas while a report is open.
+   Sends the current in-memory doc (saved or still a draft) plus a plain-
+   English instruction, and loads the result back as an unsaved draft — the
+   user still has to hit Save, same as any other change made in the editor. */
+function AiEditBox({ onEdit }) {
+  const [prompt, setPrompt] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+
+  const run = async () => {
+    if (!prompt.trim() || busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onEdit(prompt.trim());
+      setPrompt("");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="hcard" style={{ padding: "12px 18px", marginBottom: 14 }}>
+      <div className="fld" style={{ marginBottom: 8 }}>
+        <textarea
+          rows={2}
+          value={prompt}
+          disabled={busy}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder='Describe a change — e.g. "add a pie chart of spend by vendor" or "change the monthly sales chart to a line chart"'
+        />
+      </div>
+      <button className="pb go" disabled={busy || !prompt.trim()} onClick={run}>
+        {busy ? "Applying…" : "Edit with AI"}
+      </button>
+      {error && <div className="fx bad" style={{ marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
 /* Single sign-on from the admin portal: embedded in an iframe, the portal
    mints a short-lived token server-side (it holds the real login, never
    shipped to the browser) and hands it over as ?sso_token=. Consumed once
@@ -204,6 +246,11 @@ function Shell() {
     const r = await api.createProcess(doc, connection_id);
     await reloadReports();
     dispatch({ type: "open", doc, key: r.process_key, connectionId: connection_id });
+  };
+
+  const editReport = async (prompt) => {
+    const { definition } = await api.aiEditReport(prompt, state.doc, state.connectionId);
+    dispatch({ type: "loadDraft", doc: migrate(definition) });
   };
 
   const save = async () => {
@@ -416,6 +463,7 @@ function Shell() {
         <Reports onOpen={openReport} onNew={newReport} onGenerate={generateReport} reload={reloadReports} />
       )}
       {state.view === "settings" && <Settings reloadCatalog={reloadCatalog} />}
+      {editing && <AiEditBox onEdit={editReport} />}
       {editing && <Canvas />}
 
       {state.notice && (

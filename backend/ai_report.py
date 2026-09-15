@@ -89,10 +89,28 @@ class SpecError(Exception):
     pass
 
 
-def generate_definition(prompt: str, tables: list) -> dict:
+def _call_claude(system: str, user_prompt: str) -> dict:
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise SpecError("AI report generation needs ANTHROPIC_API_KEY set on the server.")
+    r = requests.post(
+        "https://api.anthropic.com/v1/messages", timeout=60,
+        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                 "content-type": "application/json"},
+        json={"model": os.environ.get("AI_REPORT_MODEL", "claude-sonnet-4-5"),
+              "max_tokens": 3000, "system": system,
+              "messages": [{"role": "user", "content": user_prompt[:4000]}]},
+    )
+    r.raise_for_status()
+    body = "".join(b.get("text", "") for b in r.json().get("content", []))
+    body = re.sub(r"^```(?:json)?|```$", "", body.strip(), flags=re.M).strip()
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        raise SpecError("The model did not return valid JSON. Try rephrasing the request.")
+
+
+def generate_definition(prompt: str, tables: list) -> dict:
     if not prompt or not prompt.strip():
         raise SpecError("Describe the report you want first.")
     if not tables:
@@ -106,22 +124,39 @@ def generate_definition(prompt: str, tables: list) -> dict:
         "Available tables and columns (use these exact names, never invent one):\n"
         f"{_catalog_text(tables)}\n\n{SCHEMA_DOC}"
     )
-    r = requests.post(
-        "https://api.anthropic.com/v1/messages", timeout=60,
-        headers={"x-api-key": key, "anthropic-version": "2023-06-01",
-                 "content-type": "application/json"},
-        json={"model": os.environ.get("AI_REPORT_MODEL", "claude-sonnet-4-5"),
-              "max_tokens": 3000, "system": system,
-              "messages": [{"role": "user", "content": prompt[:4000]}]},
+    return _call_claude(system, prompt)
+
+
+def generate_edit(prompt: str, current_definition: dict, tables: list) -> dict:
+    """Apply a plain-English change to a report that already exists (saved or
+    still an unsaved draft in the Canvas) and return the complete updated
+    definition — not a diff. The model is told to copy everything it wasn't
+    asked to touch through unchanged, ids included, so an edit for "add a
+    chart" doesn't quietly rewrite boxes the user never mentioned."""
+    if not prompt or not prompt.strip():
+        raise SpecError("Describe the change you want first.")
+    if not isinstance(current_definition, dict) or not current_definition.get("sections"):
+        raise SpecError("There's no report open to edit yet.")
+    if not tables:
+        raise SpecError("No data connection catalogue is available yet. Add and test a "
+                         "connection in System Settings first.")
+
+    current_json = json.dumps(current_definition)[:8000]
+    system = (
+        "You edit an existing JSON report definition for a report-designer tool, based on a "
+        "plain-English instruction. Return ONLY the complete updated JSON object — no prose, "
+        "no markdown fences, nothing before or after it.\n\n"
+        "Available tables and columns (use these exact names, never invent one):\n"
+        f"{_catalog_text(tables)}\n\n{SCHEMA_DOC}\n\n"
+        "You are EDITING an existing report, not creating one from scratch:\n"
+        "- Apply exactly the change the instruction describes.\n"
+        "- Copy every section, box, filter and id the instruction doesn't touch through "
+        "completely unchanged — do not rewrite ids, titles or configuration you weren't asked "
+        "to change.\n"
+        "- Only add, remove or modify what the instruction actually asks about.\n\n"
+        f"Current definition:\n{current_json}"
     )
-    r.raise_for_status()
-    body = "".join(b.get("text", "") for b in r.json().get("content", []))
-    body = re.sub(r"^```(?:json)?|```$", "", body.strip(), flags=re.M).strip()
-    try:
-        definition = json.loads(body)
-    except json.JSONDecodeError:
-        raise SpecError("The model did not return valid JSON. Try rephrasing the request.")
-    return definition
+    return _call_claude(system, prompt)
 
 
 def validate_definition(definition: dict, catalogue: dict) -> None:

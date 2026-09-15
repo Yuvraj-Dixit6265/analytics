@@ -300,6 +300,32 @@ def ai_generate_process():
     return jsonify(definition=definition, connection_id=conn_row["id"])
 
 
+@app.post("/api/processes/ai-edit")
+@auth()
+def ai_edit_process():
+    """Apply a plain-English change to whatever report is currently open in the
+    browser (saved or still an unsaved draft). Same as generation, nothing is
+    saved here — the result comes back as an unsaved draft for the user to
+    review and save themselves."""
+    b = request.get_json(silent=True) or {}
+    prompt = (b.get("prompt") or "").strip()
+    current = b.get("definition") or {}
+    conn_row = _connection_for(cid=b.get("connection_id"))
+    if not conn_row:
+        return jsonify(error="No data connection configured yet. Add one in "
+                             "System Settings first."), 400
+    try:
+        tables = db.introspect(conn_row)
+        catalogue = db.catalogue_index(tables)
+        definition = ai_report.generate_edit(prompt, current, tables)
+        ai_report.validate_definition(definition, catalogue)
+    except ai_report.SpecError as exc:
+        return jsonify(error=str(exc)), 422
+    except requests.RequestException as exc:
+        return jsonify(error=f"Could not reach the AI service: {exc}"), 502
+    return jsonify(definition=definition, connection_id=conn_row["id"])
+
+
 # --------------------------------------------------------------------------
 # execution
 # --------------------------------------------------------------------------

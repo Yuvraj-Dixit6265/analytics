@@ -482,3 +482,18 @@ body.preview .help{display:none}
   color: #fff;
   border-color: #2F3A8F;
 }
+/* Keep report tables inside their box */
+.rt-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-sizing: border-box;
+}
+
+table.rt {
+  width: 100%;
+  max-width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}

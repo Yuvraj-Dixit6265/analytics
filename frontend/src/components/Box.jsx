@@ -571,9 +571,10 @@ if (box.tableMode === "graph") {
   const [msg, sub] = stateNote(box, state.catalog);
   const alias = (ref) => ref.replace(/\./g, "__");
 
-  return (
-    <table className="rt">
-      <thead>
+    return (
+    <div className="rt-table-wrap">
+      <table className="rt">
+        <thead>
         <tr>
         
               {shown.map((col) => {
@@ -892,6 +893,7 @@ if (box.tableMode === "graph") {
       )}
 
     </table>
+    </div>
   );
 }
 

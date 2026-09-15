@@ -89,24 +89,28 @@ class SpecError(Exception):
     pass
 
 
-def _call_claude(system: str, user_prompt: str) -> dict:
+def _call_claude(system: str, user_prompt: str, max_tokens: int = 3000) -> dict:
     key = os.environ.get("ANTHROPIC_API_KEY")
     if not key:
         raise SpecError("AI report generation needs ANTHROPIC_API_KEY set on the server.")
     r = requests.post(
-        "https://api.anthropic.com/v1/messages", timeout=60,
+        "https://api.anthropic.com/v1/messages", timeout=90,
         headers={"x-api-key": key, "anthropic-version": "2023-06-01",
                  "content-type": "application/json"},
         json={"model": os.environ.get("AI_REPORT_MODEL", "claude-sonnet-4-5"),
-              "max_tokens": 3000, "system": system,
+              "max_tokens": max_tokens, "system": system,
               "messages": [{"role": "user", "content": user_prompt[:4000]}]},
     )
     r.raise_for_status()
-    body = "".join(b.get("text", "") for b in r.json().get("content", []))
+    resp = r.json()
+    body = "".join(b.get("text", "") for b in resp.get("content", []))
     body = re.sub(r"^```(?:json)?|```$", "", body.strip(), flags=re.M).strip()
     try:
         return json.loads(body)
     except json.JSONDecodeError:
+        if resp.get("stop_reason") == "max_tokens":
+            raise SpecError("The report is too large to edit in one go — try asking for a "
+                             "smaller change, or trim the report first.")
         raise SpecError("The model did not return valid JSON. Try rephrasing the request.")
 
 
@@ -124,7 +128,7 @@ def generate_definition(prompt: str, tables: list) -> dict:
         "Available tables and columns (use these exact names, never invent one):\n"
         f"{_catalog_text(tables)}\n\n{SCHEMA_DOC}"
     )
-    return _call_claude(system, prompt)
+    return _call_claude(system, prompt, max_tokens=4096)
 
 
 def generate_edit(prompt: str, current_definition: dict, tables: list) -> dict:
@@ -141,11 +145,12 @@ def generate_edit(prompt: str, current_definition: dict, tables: list) -> dict:
         raise SpecError("No data connection catalogue is available yet. Add and test a "
                          "connection in System Settings first.")
 
-    current_json = json.dumps(current_definition)[:8000]
+    current_json = json.dumps(current_definition)[:60000]
     system = (
         "You edit an existing JSON report definition for a report-designer tool, based on a "
         "plain-English instruction. Return ONLY the complete updated JSON object — no prose, "
-        "no markdown fences, nothing before or after it.\n\n"
+        "no markdown fences, nothing before or after it. Output the JSON directly with no "
+        "preamble, and do not stop until the closing brace.\n\n"
         "Available tables and columns (use these exact names, never invent one):\n"
         f"{_catalog_text(tables)}\n\n{SCHEMA_DOC}\n\n"
         "You are EDITING an existing report, not creating one from scratch:\n"
@@ -156,7 +161,7 @@ def generate_edit(prompt: str, current_definition: dict, tables: list) -> dict:
         "- Only add, remove or modify what the instruction actually asks about.\n\n"
         f"Current definition:\n{current_json}"
     )
-    return _call_claude(system, prompt)
+    return _call_claude(system, prompt, max_tokens=8192)
 
 
 def validate_definition(definition: dict, catalogue: dict) -> None:

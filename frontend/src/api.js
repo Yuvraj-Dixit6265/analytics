@@ -126,9 +126,13 @@ const api = {
   unpublish: (key) => call(`/processes/${key}/unpublish`, { method: "POST" }),
   
 
-    publicDefinition: (slug, signal) => call(`/r/${slug}`, { signal }),
+  publicDefinition: (slug, signal) => call(`/r/${slug}`, { signal }),
+  
   publicExecute: (slug, filters, signal) =>
     call(`/r/${slug}/execute`, { method: "POST", body: { filters }, signal }),
+
+publicPrItems: (slug, prNumber) =>
+  call(`/r/${slug}/pr/${encodeURIComponent(prNumber)}/items`),
 
   exportReport: (key, fmt, filters, filename) =>
     download(`/processes/${key}/export/${fmt}?filters=${encodeURIComponent(JSON.stringify(filters || {}))}`,

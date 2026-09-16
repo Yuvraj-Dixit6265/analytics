@@ -608,7 +608,6 @@ def get_pr_items(key, pr_number):
         return jsonify(
             error=f"could not load PR items: {str(exc)[:300]}"
         ), 502
-
 @app.post("/api/processes/<key>/preview-sql")
 @auth()
 def preview_sql(key):
@@ -987,7 +986,48 @@ def execute_public(key, token):
     state = body.get("filters") or {}
     results = _execute_boxes(definition, state, conn_row, cat, allow_forms=False)
     return jsonify(results=results)
+@app.get("/api/r/<key>/<token>/pr/<pr_number>/items")
+def get_public_pr_items(key, token, pr_number):
+    """Return PR items through a published link."""
+    pub = _resolve_pub(key, token)
 
+    if not pub:
+        return jsonify(error="this link is not live"), 404
+
+    conn_row = _connection_for(cid=pub["connection_id"])
+
+    if not conn_row:
+        return jsonify(error="no data connection configured"), 400
+
+    sql = """
+        SELECT
+            pri.id,
+            pri.material_id,
+            pri.quantity,
+            pri.sku,
+            pri.total_price,
+            pri.uom,
+            pri.status
+        FROM purchase_requisition_items pri
+        INNER JOIN purchase_requisitions pr
+            ON pr.id = pri.purchase_requisition_id
+        WHERE pr.pr_number = %s
+        ORDER BY pri.id
+    """
+
+    try:
+        rows = db.run_report_query(
+            conn_row,
+            sql,
+            (pr_number,),
+        )
+
+        return jsonify(rows=rows)
+
+    except Exception as exc:
+        return jsonify(
+            error=f"could not load PR items: {str(exc)[:300]}"
+        ), 502
 @app.get("/api/r/<key>/<token>/export/<fmt>")
 def export_public_report(key, token, fmt):
     if fmt not in ("pdf", "pptx"):

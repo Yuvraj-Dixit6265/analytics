@@ -150,6 +150,8 @@ const Placeholder = ({ msg, sub, height }) => (
 
 function Body({ box }) {
   const { state, dispatch } = useStore();
+  const publicPath = window.location.pathname.match(/^\/(?:analytics\/)?r\/([^/]+)\/([^/]+)/);
+  const publicSlug = publicPath ? `${publicPath[1]}/${publicPath[2]}` : null;
   const [prItems, setPrItems] = React.useState(null);
   const [prNumber, setPrNumber] = React.useState("");
   const [prLoading, setPrLoading] = React.useState(false);
@@ -722,10 +724,9 @@ if (box.tableMode === "graph") {
                         setPrLoading(true);
 
                         try {
-                          const data = await api.prItems(
-                            state.processKey,
-                            value
-                          );
+                          const data = publicSlug
+                            ? await api.publicPrItems(publicSlug, value)
+                            : await api.prItems(state.processKey, value);
 
                           setPrItems(data.rows || []);
                         } catch (err) {

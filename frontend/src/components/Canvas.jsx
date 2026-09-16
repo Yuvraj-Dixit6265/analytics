@@ -363,7 +363,137 @@ function useOptions(f) {
   }, [state.processKey, f.id, f.optionSource, f.list, f.table, f.column, f.optTable, f.optColumn]);
   return options;
 }
+function dateString(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
+function startOfWeek(d) {
+  const x = new Date(d);
+  const day = x.getDay(); // Sun=0, Mon=1
+  const diff = day === 0 ? -6 : 1 - day;
+  x.setDate(x.getDate() + diff);
+  return x;
+}
+
+function startOfMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function startOfQuarter(d) {
+  const quarterMonth = Math.floor(d.getMonth() / 3) * 3;
+  return new Date(d.getFullYear(), quarterMonth, 1);
+}
+
+function startOfYear(d) {
+  return new Date(d.getFullYear(), 0, 1);
+}
+
+function datePresetRange(preset) {
+  const today = new Date();
+
+  if (!preset) return {};
+
+  if (preset === "today") {
+    return {
+      from: dateString(today),
+      to: dateString(today),
+    };
+  }
+
+  if (preset === "yesterday") {
+    const d = new Date(today);
+    d.setDate(d.getDate() - 1);
+    return {
+      from: dateString(d),
+      to: dateString(d),
+    };
+  }
+
+  if (preset === "this-week") {
+    const from = startOfWeek(today);
+    return {
+      from: dateString(from),
+      to: dateString(today),
+    };
+  }
+
+  if (preset === "last-week") {
+    const to = startOfWeek(today);
+    to.setDate(to.getDate() - 1);
+
+    const from = new Date(to);
+    from.setDate(from.getDate() - 6);
+
+    return {
+      from: dateString(from),
+      to: dateString(to),
+    };
+  }
+
+  if (preset === "this-month") {
+    const from = startOfMonth(today);
+    return {
+      from: dateString(from),
+      to: dateString(today),
+    };
+  }
+
+  if (preset === "last-month") {
+    const from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const to = new Date(today.getFullYear(), today.getMonth(), 0);
+
+    return {
+      from: dateString(from),
+      to: dateString(to),
+    };
+  }
+
+  if (preset === "this-quarter") {
+    const from = startOfQuarter(today);
+    return {
+      from: dateString(from),
+      to: dateString(today),
+    };
+  }
+
+  if (preset === "last-quarter") {
+    const thisQuarter = startOfQuarter(today);
+
+    const from = new Date(thisQuarter);
+    from.setMonth(from.getMonth() - 3);
+
+    const to = new Date(thisQuarter);
+    to.setDate(0);
+
+    return {
+      from: dateString(from),
+      to: dateString(to),
+    };
+  }
+
+  if (preset === "this-year") {
+    const from = startOfYear(today);
+    return {
+      from: dateString(from),
+      to: dateString(today),
+    };
+  }
+
+  if (preset === "last-year") {
+    const from = new Date(today.getFullYear() - 1, 0, 1);
+    const to = new Date(today.getFullYear() - 1, 11, 31);
+
+    return {
+      from: dateString(from),
+      to: dateString(to),
+    };
+  }
+
+  return {};
+}
 function Control({ filter: f }) {
   const { state, dispatch } = useStore();
   const value = state.filterState[f.id];
@@ -380,14 +510,81 @@ function Control({ filter: f }) {
     case "date":
       return <input type="date" value={value || ""} onChange={(e) => set(e.target.value)} />;
     case "daterange": {
-      const o = value && typeof value === "object" ? value : {};
-      return (
-        <span className="pair">
-          <input type="date" value={o.from || ""} onChange={(e) => set({ ...o, from: e.target.value })} />
-          <input type="date" value={o.to || ""} onChange={(e) => set({ ...o, to: e.target.value })} />
-        </span>
-      );
+  const o = value && typeof value === "object" ? value : {};
+
+  const preset =
+    o.preset ||
+    (o.from && o.to ? "custom" : "");
+
+  const applyPreset = (nextPreset) => {
+    if (nextPreset === "custom") {
+      set({
+        preset: "custom",
+        from: o.from || "",
+        to: o.to || "",
+      });
+      return;
     }
+
+    const range = datePresetRange(nextPreset);
+
+    set({
+      preset: nextPreset,
+      from: range.from || "",
+      to: range.to || "",
+    });
+  };
+
+  return (
+    <div className="date-range-control">
+      <select
+        value={preset}
+        onChange={(e) => applyPreset(e.target.value)}
+      >
+        <option value="">Select date range</option>
+        <option value="today">Today</option>
+        <option value="this-week">This week</option>
+        <option value="this-month">This Month</option>
+        <option value="this-quarter">This quarter</option>
+        <option value="this-year">This Year</option>
+        <option value="yesterday">Yesterday</option>
+        <option value="last-week">Last Week</option>
+        <option value="last-month">Last Month</option>
+        <option value="last-quarter">Last Quarter</option>
+        <option value="last-year">Last Year</option>
+        <option value="custom">Custom</option>
+      </select>
+
+      {preset === "custom" && (
+        <span className="pair">
+          <input
+            type="date"
+            value={o.from || ""}
+            onChange={(e) =>
+              set({
+                ...o,
+                preset: "custom",
+                from: e.target.value,
+              })
+            }
+          />
+
+          <input
+            type="date"
+            value={o.to || ""}
+            onChange={(e) =>
+              set({
+                ...o,
+                preset: "custom",
+                to: e.target.value,
+              })
+            }
+          />
+        </span>
+      )}
+    </div>
+  );
+}
     case "toggle":
       return (
         <div className="opts">

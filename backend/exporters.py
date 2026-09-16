@@ -61,17 +61,101 @@ def build_browser_pdf(url):
 
         # Hide the download buttons themselves — they shouldn't appear
         # inside the exported file.
-        page.add_style_tag(content=".export-actions { display: none !important; }")
+        page.add_style_tag(content="""
+            /* PDF EXPORT ONLY:
+            Show the complete published table instead of its horizontal
+            scrolling viewport. This does not affect the live page. */
+
+            .export-actions {
+                display: none !important;
+            }
+
+            .rt-table-wrap {
+                overflow: visible !important;
+                width: max-content !important;
+                max-width: none !important;
+            }
+
+            table.rt {
+                width: max-content !important;
+                max-width: none !important;
+                min-width: 100% !important;
+            }
+
+            .box,
+            .pane,
+            .sheet,
+            .sec {
+                overflow: visible !important;
+            }
+                """)
 
         sheet = page.locator(".sheet")
+
         dimensions = sheet.evaluate("""
             el => {
                 const r = el.getBoundingClientRect();
-                return { x: r.x, y: r.y, width: r.width, height: r.height };
+                return {
+                    x: r.x,
+                    y: r.y,
+                    width: r.width,
+                    height: r.height
+                };
             }
         """)
+
         print("PDF SHEET CSS DIMENSIONS:", dimensions)
 
+        # Expand wide tables so the complete table is captured
+        page.evaluate("""
+            () => {
+                document.querySelectorAll('.rt-table-wrap').forEach(wrap => {
+                    const table = wrap.querySelector('table.rt');
+
+                    if (!table) return;
+
+                    const fullWidth = Math.max(
+                        wrap.scrollWidth,
+                        table.scrollWidth,
+                        table.getBoundingClientRect().width
+                    );
+
+                    wrap.style.width = fullWidth + 'px';
+                    wrap.style.maxWidth = 'none';
+                    wrap.style.overflow = 'visible';
+
+                    table.style.width = fullWidth + 'px';
+                    table.style.maxWidth = 'none';
+                });
+            }
+        """)
+
+        page.wait_for_timeout(300)
+        # Expand wide tables so the complete table is captured
+        page.evaluate("""
+            () => {
+                document.querySelectorAll('.rt-table-wrap').forEach(wrap => {
+                    const table = wrap.querySelector('table.rt');
+
+                    if (!table) return;
+
+                    const fullWidth = Math.max(
+                        wrap.scrollWidth,
+                        table.scrollWidth,
+                        table.getBoundingClientRect().width
+                    );
+
+                    wrap.style.width = fullWidth + 'px';
+                    wrap.style.maxWidth = 'none';
+                    wrap.style.overflow = 'visible';
+
+                    table.style.width = fullWidth + 'px';
+                    table.style.maxWidth = 'none';
+                });
+            }
+        """)
+
+        page.wait_for_timeout(300)
         # ------------------------------------------------------------
         # Section navigation button positions — become invisible
         # clickable areas in the final PDF.
@@ -106,6 +190,28 @@ def build_browser_pdf(url):
                   "render, just without in-PDF jump links.")
             print("BUTTON COUNT:", sheet.locator(".section-nav button").count())
             print("SECTION COUNT:", sheet.locator('.sec[id^="section-"]').count())
+            page.evaluate("""
+                () => {
+                    document.querySelectorAll('.rt-table-wrap').forEach(wrap => {
+                        const table = wrap.querySelector('table.rt');
+
+                        if (!table) return;
+
+                        const fullWidth = Math.max(
+                            wrap.scrollWidth,
+                            table.scrollWidth,
+                            table.getBoundingClientRect().width
+                        );
+
+                        wrap.style.width = fullWidth + 'px';
+                        wrap.style.maxWidth = 'none';
+                        wrap.style.overflow = 'visible';
+
+                        table.style.width = fullWidth + 'px';
+                        table.style.maxWidth = 'none';
+                    });
+                }
+            """)
 
         screenshot = sheet.screenshot(type="png", animations="disabled")
         device_scale_factor = page.evaluate("() => window.devicePixelRatio")
@@ -118,8 +224,8 @@ def build_browser_pdf(url):
     image = Image.open(io.BytesIO(screenshot)).convert("RGB")
     print("PDF SCREENSHOT PIXELS:", image.size)
 
-    A4_WIDTH = 2480
-    A4_HEIGHT = 3508
+    A4_WIDTH = 3508
+    A4_HEIGHT = 2480
     scale = A4_WIDTH / image.width
     scaled_width = A4_WIDTH
     scaled_height = round(image.height * scale)

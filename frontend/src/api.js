@@ -120,6 +120,19 @@ const api = {
     `/processes/${key}/pr/${encodeURIComponent(prNumber)}/items`,
     { signal }
   ),
+  getDetailRows: (
+  key,
+  parentTable,
+  lookupColumn,
+  value,
+  detailColumns = [],
+  limit = 20,
+  signal
+) =>
+  call(
+    `/processes/${key}/detail?parentTable=${encodeURIComponent(parentTable)}&lookupColumn=${encodeURIComponent(lookupColumn)}&value=${encodeURIComponent(value)}&detailColumns=${encodeURIComponent(detailColumns.join(","))}&limit=${limit}`,
+    { signal }
+  ),
   previewSql: (key, box, definition, filters) =>
     call(`/processes/${key}/preview-sql`, {
       method: "POST", body: { box, definition, filters },

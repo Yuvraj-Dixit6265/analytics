@@ -146,7 +146,32 @@ export function ensureConfigs(b) {
     totals: false,
     headStyle: S(),
     graphBoxId: "",
+    // Optional row-detail list shown when a row's configured key is clicked.
+  detail: {
+  enabled: false,
+  keyColumn: "",
+  title: "Details",
+  table: "",
+  relatedColumn: "",
+  columns: [],
+  limit: 20,
+  },
+};
+  if (!b.table.detail) {
+  b.table.detail = {
+    enabled: false,
+    keyColumn: "",
+    title: "Details",
+    table: "",
+    relatedColumn: "",
+    columns: [],
+    limit: 20,
   };
+} else {
+  if (!b.table.detail.table) b.table.detail.table = "";
+  if (!b.table.detail.relatedColumn) b.table.detail.relatedColumn = "";
+}
+
   if (!b.manualTable) b.manualTable = {
   columns: [
     { id: uid("col"), label: "Column 1" },

@@ -689,47 +689,214 @@ def get_pr_items(key, pr_number):
         return jsonify(
             error=f"could not load PR items: {str(exc)[:300]}"
         ), 502
-@app.post("/api/processes/<key>/preview-sql")
+@app.get("/api/processes/<key>/detail")
 @auth()
-def preview_sql(key):
-    body = request.get_json(silent=True) or {}
-    row = db.q1("SELECT * FROM processes WHERE process_key=%s", (key,))
-    definition = body.get("definition") or {}
-    conn_row = _connection_for(row)
+def get_detail_rows(key):
+    value = request.args.get("value", "")
+    parent_table = request.args.get("parentTable", "").strip()
+    lookup_column = request.args.get("lookupColumn", "").strip()
+
+    detail_columns = [
+        x.strip()
+        for x in request.args.get("detailColumns", "").split(",")
+        if x.strip()
+    ]
+
+    limit = min(request.args.get("limit", 20, type=int), 100)
+
+    if not parent_table or not lookup_column or not detail_columns:
+        return jsonify(rows=[])
+
+    process = db.q1(
+        "SELECT * FROM processes WHERE process_key=%s",
+        (key,),
+    )
+
+    if not process:
+        return jsonify(error="process not found"), 404
+
+    conn_row = _connection_for(
+        cid=process.get("connection_id")
+    )
+
     if not conn_row:
-        return jsonify(error="no data connection configured"), 400
-    cat = _catalogue(conn_row)
-    box = body.get("box") or {}
-    return jsonify(preview(box, definition.get("filters"), body.get("filters") or {}, cat))
+        return jsonify(error="connection not found"), 404
 
+    tables = db.introspect(conn_row)
+    catalogue = db.catalogue_index(tables)
+    relationships = db.relationships(conn_row, tables)
 
-@app.get("/api/processes/<key>/filters/<client_id>/options")
-@auth()
-def filter_options(key, client_id):
-    row = db.q1("SELECT * FROM processes WHERE process_key=%s", (key,))
-    if not row:
-        return jsonify(error="no such report"), 404
-    definition = row["definition"] if isinstance(row["definition"], dict) \
-        else json.loads(row["definition"])
-    flt = next((f for f in definition.get("filters", []) if f.get("id") == client_id), None)
-    if not flt:
-        return jsonify(options=[])
-    if flt.get("optionSource") == "list":
-        vals = [v.strip() for v in (flt.get("list") or "").replace(",", "\n").split("\n")]
-        return jsonify(options=[{"value": v, "label": v} for v in vals if v])
+    if parent_table not in catalogue:
+        return jsonify(error="invalid parent table"), 400
 
-    conn_row = _connection_for(row)
-    if not conn_row:
-        return jsonify(options=[])
-    cat = _catalogue(conn_row)
-    table = flt.get("optTable") if flt.get("optionSource") == "table" else flt.get("table")
-    column = flt.get("optColumn") if flt.get("optionSource") == "table" else flt.get("column")
-    if table not in cat or column not in cat.get(table, set()):
-        return jsonify(options=[])
-    sql = f"SELECT DISTINCT `{table}`.`{column}` AS v FROM `{table}` " \
-          f"WHERE `{table}`.`{column}` IS NOT NULL ORDER BY v LIMIT 500"
-    rows = db.run_report_query(conn_row, sql, ())
-    return jsonify(options=[{"value": r["v"], "label": str(r["v"])} for r in rows])
+    if lookup_column not in catalogue[parent_table]:
+        return jsonify(error="invalid lookup column"), 400
+
+    # Find a directly related table containing one or more
+    # of the configured detail columns.
+    candidates = []
+
+    for relationship in relationships:
+        from_table = relationship["from_table"]
+        from_column = relationship["from_column"]
+        to_table = relationship["to_table"]
+        to_column = relationship["to_column"]
+
+        if from_table == parent_table:
+            detail_table = to_table
+            parent_join_column = from_column
+            detail_join_column = to_column
+
+        elif to_table == parent_table:
+            detail_table = from_table
+            parent_join_column = to_column
+            detail_join_column = from_column
+
+        else:
+            continue
+
+        if detail_table not in catalogue:
+            continue
+
+        matching_columns = [
+            col
+            for col in detail_columns
+            if col in catalogue[detail_table]
+        ]
+
+        if not matching_columns:
+            continue
+
+        candidates.append({
+            "table": detail_table,
+            "parent_join_column": parent_join_column,
+            "detail_join_column": detail_join_column,
+            "columns": matching_columns,
+        })
+
+    if not candidates:
+        print(
+            "AUTO DETAIL: no related table found",
+            {
+                "parent_table": parent_table,
+                "detail_columns": detail_columns,
+            },
+        )
+        return jsonify(rows=[])
+
+    # Prefer the relationship containing the most requested
+    # detail columns.
+    candidates.sort(
+        key=lambda item: len(item["columns"]),
+        reverse=True,
+    )
+
+    selected = candidates[0]
+
+    detail_table = selected["table"]
+    parent_join_column = selected["parent_join_column"]
+    detail_join_column = selected["detail_join_column"]
+
+    # Detail columns may belong to either the parent or detail table.
+    select_parts = []
+
+    for col in detail_columns:
+        if col in catalogue[parent_table]:
+            select_parts.append(
+                f"`{parent_table}`.`{col}` AS `{col}`"
+            )
+
+        elif col in catalogue[detail_table]:
+            select_parts.append(
+                f"`{detail_table}`.`{col}` AS `{col}`"
+            )
+
+    if not select_parts:
+        return jsonify(rows=[])
+
+    sql = f"""
+        SELECT {", ".join(select_parts)}
+        FROM `{parent_table}`
+        INNER JOIN `{detail_table}`
+            ON `{parent_table}`.`{parent_join_column}`
+            = `{detail_table}`.`{detail_join_column}`
+        WHERE `{parent_table}`.`{lookup_column}` = %s
+        LIMIT %s
+    """
+
+    print(
+        "AUTO DETAIL:",
+        {
+            "parent_table": parent_table,
+            "detail_table": detail_table,
+            "parent_join_column": parent_join_column,
+            "detail_join_column": detail_join_column,
+            "detail_columns": detail_columns,
+        },
+    )
+
+    with db.reporting(conn_row) as cur:
+        cur.execute(sql, (value, limit))
+        rows = cur.fetchall()
+
+    return jsonify(rows=db.clean(rows))
+
+    # Prefer the related table containing the most requested
+    # child-specific columns, then the shortest relationship path.
+    candidates.sort(
+        key=lambda x: (
+            -x["matched"],
+            x["path_length"],
+        )
+    )
+
+    selected = candidates[0]
+
+    detail_table = selected["table"]
+    parent_join_col = selected["parent_join_col"]
+    child_join_col = selected["child_join_col"]
+
+    # Build columns from BOTH parent and child tables.
+    select_parts = []
+
+    for col in detail_columns:
+        if col in catalogue[parent_table]:
+            select_parts.append(
+                f"`{parent_table}`.`{col}` AS `{col}`"
+            )
+        elif col in catalogue[detail_table]:
+            select_parts.append(
+                f"`{detail_table}`.`{col}` AS `{col}`"
+            )
+
+    if not select_parts:
+        return jsonify(rows=[])
+
+    sql = f"""
+        SELECT {", ".join(select_parts)}
+        FROM `{parent_table}`
+        INNER JOIN `{detail_table}`
+            ON `{parent_table}`.`{parent_join_col}`
+            = `{detail_table}`.`{child_join_col}`
+        WHERE `{parent_table}`.`{lookup_column}` = %s
+        LIMIT %s
+    """
+
+    print(
+        "AUTO DETAIL:",
+        {
+            "parent_table": parent_table,
+            "detail_table": detail_table,
+            "parent_join_col": parent_join_col,
+            "child_join_col": child_join_col,
+            "detail_columns": detail_columns,
+        },
+    )
+    with db.reporting(conn_row) as cur:
+        cur.execute(sql, (value, limit))
+        rows = cur.fetchall()
+
+    return jsonify(rows=db.clean(rows))
 
 
 # --------------------------------------------------------------------------

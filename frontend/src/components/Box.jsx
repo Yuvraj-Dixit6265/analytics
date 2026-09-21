@@ -152,9 +152,9 @@ function Body({ box }) {
   const { state, dispatch } = useStore();
   const publicPath = window.location.pathname.match(/^\/(?:analytics\/)?r\/([^/]+)\/([^/]+)/);
   const publicSlug = publicPath ? `${publicPath[1]}/${publicPath[2]}` : null;
-  const [prItems, setPrItems] = React.useState(null);
-  const [prNumber, setPrNumber] = React.useState("");
-  const [prLoading, setPrLoading] = React.useState(false);
+  const [detailItems, setDetailItems] = React.useState(null);
+const [detailValue, setDetailValue] = React.useState("");
+const [detailLoading, setDetailLoading] = React.useState(false);
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
 
@@ -560,10 +560,11 @@ if (box.tableMode === "graph") {
 
   /* DATA TABLE */
   const c = box.table;
+  console.log("DETAIL CONFIG:", JSON.stringify(c.detail, null, 2));
   const shown = c.columns.filter((x) => x.on);
 
   if (!shown.length)
-    return (
+    return (  
       <div className="empty">
         No columns selected. Open <b>⚙ Set up</b> and tick some.
       </div>
@@ -672,21 +673,29 @@ if (box.tableMode === "graph") {
       <tbody>
   {rows.length ? (
     rows.slice(0, c.limit || 10).map((r, i) => {
-      const rowPrColumn = shown.find((col) => {
-        return (
-          String(col.col).toLowerCase() === "pr_number" ||
-          String(col.label || "").toLowerCase() === "pr number"
-        );
+      const detail = c.detail || {};
+      console.log("DETAIL USED:", {
+        baseTable: box?.src?.base || "",
+        keyColumn: detail.keyColumn,
+        detailColumns: (detail.columns || []).map((x) => x.col),
       });
+      console.log("FULL TABLE CONFIG:", JSON.stringify(c, null, 2));
 
-      const rowPrNumber = rowPrColumn
-        ? r[alias(rowPrColumn.col)]
+      const clickable =
+        detail.enabled &&
+        detail.keyColumn &&
+        shown.find(
+          (col) => String(col.col) === String(detail.keyColumn)
+        );
+
+      const rowDetailValue = clickable
+        ? r[alias(clickable.col)]
         : null;
 
-      const isSelectedPR =
-        rowPrNumber &&
-        String(prNumber) === String(rowPrNumber) &&
-        prItems !== null;
+      const isSelected =
+        rowDetailValue != null &&
+        String(detailValue) === String(rowDetailValue) &&
+        detailItems !== null;
 
       return (
         <React.Fragment key={i}>
@@ -696,10 +705,11 @@ if (box.tableMode === "graph") {
             {shown.map((col) => {
               const value = r[alias(col.col)];
 
-              const isPrNumber =
-                String(col.col).toLowerCase() === "pr_number" ||
-                String(col.label || "").toLowerCase() === "pr number";
-
+              const isClickable =
+              detail.enabled &&
+              detail.keyColumn &&
+              String(col.col) === String(detail.keyColumn) &&
+              value != null;
               return (
                 <td
                   key={col.col}
@@ -712,32 +722,38 @@ if (box.tableMode === "graph") {
                       : undefined
                   }
                 >
-                  {isPrNumber && value ? (
+                  {isClickable ? (
                     <button
                       type="button"
                       className="pr-link"
                       onClick={async () => {
-                        const clickedPR = String(value);
+                        const clickedValue = String(value);
 
-                        setPrNumber(clickedPR);
-                        setPrItems([]);
-                        setPrLoading(true);
+                        setDetailValue(clickedValue);
+                        setDetailItems([]);
+                        setDetailLoading(true);
 
                         try {
-                          const data = publicSlug
-                            ? await api.publicPrItems(publicSlug, value)
-                            : await api.prItems(state.processKey, value);
-
-                          setPrItems(data.rows || []);
-                        } catch (err) {
-                          console.error(
-                            "Could not load PR items:",
-                            err
+                          const data = await api.getDetailRows(
+                            state.processKey,
+                            box?.src?.base || "",
+                            detail.keyColumn,
+                            clickedValue,
+                            (detail.columns || [])
+                              .map((col) => col.col)
+                              .filter(Boolean),
+                            detail.limit || 20
                           );
 
-                          setPrItems([]);
+                          setDetailItems(data.rows || []);
+                        } catch (err) {
+                          console.error(
+                            "Could not load detail rows:",
+                            err
+                          );
+                          setDetailItems([]);
                         } finally {
-                          setPrLoading(false);
+                          setDetailLoading(false);
                         }
                       }}
                     >
@@ -751,69 +767,76 @@ if (box.tableMode === "graph") {
             })}
           </tr>
 
-          {isSelectedPR && (
+          {isSelected && (
             <tr className="pr-items-row">
               <td colSpan={shown.length}>
                 <div className="pr-inline">
                   <div className="pr-inline-header">
                     <strong>
-                      PR Items — {prNumber}
+                      {detail.title || "Details"} — {detailValue}
                     </strong>
 
                     <button
                       type="button"
                       onClick={() => {
-                        setPrItems(null);
-                        setPrNumber("");
+                        setDetailItems(null);
+                        setDetailValue("");
                       }}
                     >
                       ×
                     </button>
                   </div>
 
-                  {prLoading ? (
+                  {detailLoading ? (
                     <div className="pr-empty">
-                      Loading PR items...
+                      Loading details...
                     </div>
-                  ) : prItems.length === 0 ? (
+                  ) : detailItems.length === 0 ? (
                     <div className="pr-empty">
-                      No items found for this Purchase Requisition.
+                      No detail records found.
                     </div>
                   ) : (
                     <div className="pr-items-table-wrap">
                       <table className="rt pr-items-table">
                         <thead>
                           <tr>
-                            <th>Material ID</th>
-                            <th>Quantity</th>
-                            <th>SKU</th>
-                            <th>Total Price</th>
-                            <th>UOM</th>
-                            <th>Status</th>
+                            {(detail.columns || [])
+                              .filter((col) => col.col)
+                              .map((col) => (
+                                <th key={col.col}>
+                                  {col.label || col.col}
+                                </th>
+                              ))}
                           </tr>
                         </thead>
 
                         <tbody>
-                          {prItems.map((item, itemIndex) => (
+                          {detailItems.map((item, itemIndex) => (
                             <tr key={itemIndex}>
-                              <td>
-                                {item.material_id ?? "—"}
-                              </td>
-                              <td>
-                                {item.quantity ?? "—"}
-                              </td>
-                              <td>
-                                {item.sku ?? "—"}
-                              </td>
-                              <td>
-                                {item.total_price ?? "—"}
-                              </td>
-                              <td>
-                                {item.uom ?? "—"}
-                              </td>
-                              <td>
-                                {item.status ?? "—"}
-                              </td>
+                              {(detail.columns || [])
+                                .filter((col) => col.col)
+                                .map((col) => {
+                                  const value =
+                                    item[alias(col.col)] ??
+                                    item[col.col];
+
+                                  return (
+                                    <td
+                                      key={col.col}
+                                      className={
+                                        col.align === "right"
+                                          ? "num"
+                                          : undefined
+                                      }
+                                    >
+                                      {fmtCell(
+                                        value,
+                                        col.fmt,
+                                        locale
+                                      )}
+                                    </td>
+                                  );
+                                })}
                             </tr>
                           ))}
                         </tbody>
@@ -1572,6 +1595,7 @@ function GraphTableData({ box, set }) {
 function TableData({ box, set }) {
   const { state, dispatch } = useStore();
   const c = box.table || {};
+  const parentTable = box.src?.base || "";
 
   // Get columns from the selected database source
   const availableColumns = colOptions(state.catalog, box.src)
@@ -1795,7 +1819,158 @@ function TableData({ box, set }) {
         Add columns, connect them to database fields, rename their headings,
         or leave a column blank.
       </Hint>
+              <Group>Row Detail List</Group>
 
+      <Switch
+        on={c.detail?.enabled === true}
+        label="Enable detail list"
+        onChange={(v) => set("table.detail.enabled", v)}
+      />
+
+      {c.detail?.enabled && (
+        <>
+        <Row>
+</Row>
+<Row>
+  <Field label="Clickable column">
+    <Select
+      value={c.detail.keyColumn || ""}
+      options={[
+        ["", "Select column"],
+        ...columns
+          .filter((x) => x.col)
+          .map((x) => [
+            x.col,
+            x.label || x.col,
+          ]),
+      ]}
+      onChange={(v) =>
+        set("table.detail.keyColumn", v)
+      }
+    />
+  </Field>
+
+  <Field label="Detail title">
+    <Text
+      value={c.detail.title || "Details"}
+      placeholder="Details"
+      onChange={(v) =>
+        set("table.detail.title", v)
+      }
+    />
+  </Field>
+
+  <Field label="Rows">
+    <Select
+      value={c.detail.limit || 20}
+      numeric
+      options={[5, 10, 20, 50, 100]}
+      onChange={(v) =>
+        set("table.detail.limit", v)
+      }
+    />
+  </Field>
+</Row>
+          <Group>Detail Columns</Group>
+
+          <div className="collist">
+            {(c.detail.columns || []).map((col, i) => (
+              <div className="colrow" key={`${col.col}-${i}`}>
+
+                <Field label="Column">
+                  <Select
+                    value={col.col || ""}
+                    options={[
+                      ["", "Select column"],
+                      ...availableColumns,
+                    ]}
+                    onChange={(v) => {
+                      set(
+                        `table.detail.columns.${i}.col`,
+                        v
+                      );
+
+                      if (!col.label && v) {
+                        set(
+                          `table.detail.columns.${i}.label`,
+                          v
+                        );
+                      }
+                    }}
+                  />
+                </Field>
+
+                <Field label="Heading">
+                  <Text
+                    value={col.label || ""}
+                    placeholder="Column heading"
+                    onChange={(v) =>
+                      set(
+                        `table.detail.columns.${i}.label`,
+                        v
+                      )
+                    }
+                  />
+                </Field>
+
+                <Field label="Format">
+                  <Select
+                    value={col.fmt || "auto"}
+                    options={FMTS}
+                    onChange={(v) =>
+                      set(
+                        `table.detail.columns.${i}.fmt`,
+                        v
+                      )
+                    }
+                  />
+                </Field>
+
+                <button
+                  className="xbtn"
+                  title="Remove detail column"
+                  onClick={() =>
+                    set(
+                      "table.detail.columns",
+                      (c.detail.columns || []).filter(
+                        (_, index) => index !== i
+                      )
+                    )
+                  }
+                >
+                  ×
+                </button>
+
+              </div>
+            ))}
+          </div>
+
+          <button
+            className="pb"
+            onClick={() =>
+              set("table.detail.columns", [
+                ...(c.detail.columns || []),
+                {
+                  col: "",
+                  label: "",
+                  fmt: "auto",
+                  align: "left",
+                  width: "auto",
+                  on: true,
+                },
+              ])
+            }
+            style={{ marginTop: 10 }}
+          >
+            + Add Detail Column
+          </button>
+
+          <Hint>
+            Choose a column to make clickable. The detail list can have
+            its own database columns and headings.
+          </Hint>
+        </>
+      )}
       <SourceEditor box={box} />
     </>
   );

@@ -1,8 +1,8 @@
 import React from "react";
 import { StoreProvider, useStore } from "../store.jsx";
-import Box from "./Box.jsx";
 import { normS, styleObj, frameStyle, fmtCell, fmtNumber } from "../model.js";
 import Chart from "../charts/Chart.jsx";
+import api from "../api.js";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
@@ -66,7 +66,7 @@ export default function PublicReport() {
 
 function PublicReportInner({ slug }) {
   const { state, dispatch } = useStore();
-
+  const [publicKey, publicToken] = slug.split("/");
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
 
@@ -394,6 +394,8 @@ function PublicSection({ section, index }) {
               key={box.id}
               box={box}
               cols={cols}
+              publicKey={publicKey}
+              publicToken={publicToken}
             />
           ))}
       </div>
@@ -401,7 +403,12 @@ function PublicSection({ section, index }) {
   );
 }
 
-function PublicBox({ box, cols }) {
+function PublicBox({
+  box,
+  cols,
+  publicKey,
+  publicToken,
+}) {
   const span = Math.max(
     1,
     Math.min(cols, box.span || 1)
@@ -431,14 +438,26 @@ function PublicBox({ box, cols }) {
       )}
 
       <div style={styleObj(box.style, { bg: true, align: true })}>
-        <PublicBoxBody box={box} />
+        <PublicBoxBody
+          box={box}
+          publicKey={publicKey}
+          publicToken={publicToken}
+        />
       </div>
     </div>
   );
 }
 
-function PublicBoxBody({ box }) {
+function PublicBoxBody({
+  box,
+  publicKey,
+  publicToken,
+}) {
   const { state } = useStore();
+
+  const [detailItems, setDetailItems] = React.useState(null);
+  const [detailValue, setDetailValue] = React.useState("");
+  const [detailLoading, setDetailLoading] = React.useState(false);
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
 
@@ -657,12 +676,13 @@ function PublicBoxBody({ box }) {
     );
   }
 
-  // Existing Data Table: keep the original query/result behavior.
+  // Existing Data Table
   const columns = (box.table?.columns || []).filter(
     (x) => x.on
   );
 
   const rows = result?.rows || [];
+  const detail = box.table?.detail || {};
 
   if (!columns.length) {
     return (
@@ -671,6 +691,14 @@ function PublicBoxBody({ box }) {
       </div>
     );
   }
+
+  const clickable =
+    detail.enabled &&
+    detail.keyColumn &&
+    columns.find(
+      (col) =>
+        String(col.col) === String(detail.keyColumn)
+    );
 
   return (
     <table className="rt">
@@ -690,20 +718,229 @@ function PublicBoxBody({ box }) {
       </thead>
 
       <tbody>
-        {rows.map((row, rowIndex) => (
-          <tr key={rowIndex}>
-            {columns.map((col) => (
-              <td
-                key={col.col}
-                className={
-                  col.align === "right" ? "num" : undefined
-                }
-              >
-                {fmtCell(row[col.col], col.fmt)}
-              </td>
-            ))}
-          </tr>
-        ))}
+        {rows.map((row, rowIndex) => {
+          const rowDetailValue = clickable
+            ? row[clickable.col]
+            : null;
+
+          const isSelected =
+            rowDetailValue != null &&
+            String(detailValue) ===
+              String(rowDetailValue) &&
+            detailItems !== null;
+
+          return (
+            <React.Fragment key={rowIndex}>
+              <tr>
+                {columns.map((col) => {
+                  const value =
+                    row[col.col] ??
+                    row[col.col?.split(".").pop()];
+
+                  const isClickable =
+                    detail.enabled &&
+                    detail.keyColumn &&
+                    String(col.col) ===
+                      String(detail.keyColumn) &&
+                    value != null;
+
+                  return (
+                    <td
+                      key={col.col}
+                      className={
+                        col.align === "right"
+                          ? "num"
+                          : undefined
+                      }
+                    >
+                      {isClickable ? (
+                        <button
+                          type="button"
+                          className="pr-link"
+                          onClick={async () => {
+                            const clickedValue =
+                              String(value);
+
+                            setDetailValue(
+                              clickedValue
+                            );
+                            setDetailItems([]);
+                            setDetailLoading(true);
+
+                            try {
+                                const params = new URLSearchParams({
+                                  parentTable: box?.src?.base || "",
+                                  lookupColumn: detail.keyColumn,
+                                  value: clickedValue,
+                                  detailColumns: (detail.columns || [])
+                                    .map((col) => col.col)
+                                    .filter(Boolean)
+                                    .join(","),
+                                  limit: String(detail.limit || 20),
+                                });
+
+                                console.log("PUBLIC DETAIL REQUEST", {
+                                  key,
+                                  token,
+                                  parentTable: box?.src?.base || "",
+                                  lookupColumn: detail.keyColumn,
+                                  value: clickedValue,
+                                  detailColumns: (detail.columns || [])
+                                    .map((col) => col.col)
+                                    .filter(Boolean),
+                                });
+                                console.log(
+                                  " PUBLIC DETAIL URL",
+                                  `${API_BASE}/r/${encodeURIComponent(key)}/${encodeURIComponent(token)}/detail?${params.toString()}`
+                                );
+                                const res = await fetch(
+                                  `${API_BASE}/r/${encodeURIComponent(key)}/${encodeURIComponent(token)}/detail?${params.toString()}`
+                                );  
+
+                                if (!res.ok) {
+                                  throw new Error("Could not load detail rows");
+                                }
+
+                                const data = await res.json();
+
+                                console.log("PUBLIC DETAIL DATA", data);
+
+                                setDetailItems(data.rows || []);
+                              } catch (err) {
+                              console.error(
+                                "Could not load detail rows:",
+                                err
+                              );
+                              setDetailItems([]);
+                            } finally {
+                              setDetailLoading(false);
+                            }
+                          }}
+                        >
+                          {fmtCell(
+                            value,
+                            col.fmt,
+                            locale
+                          )}
+                        </button>
+                      ) : (
+                        fmtCell(
+                          value,
+                          col.fmt,
+                          locale
+                        )
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+
+              {isSelected && (
+                <tr>
+                  <td colSpan={columns.length}>
+                    <div className="pr-inline">
+                      <div className="pr-inline-header">
+                        <strong>
+                          {detail.title || "Details"} —{" "}
+                          {detailValue}
+                        </strong>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDetailItems(null);
+                            setDetailValue("");
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+
+                      {detailLoading ? (
+                        <div className="pr-empty">
+                          Loading details...
+                        </div>
+                      ) : detailItems.length === 0 ? (
+                        <div className="pr-empty">
+                          No detail records found.
+                        </div>
+                      ) : (
+                        <div className="pr-items-table-wrap">
+                          <table className="rt pr-items-table">
+                            <thead>
+                              <tr>
+                                {(detail.columns || [])
+                                  .filter(
+                                    (col) => col.col
+                                  )
+                                  .map((col) => (
+                                    <th key={col.col}>
+                                      {col.label ||
+                                        col.col}
+                                    </th>
+                                  ))}
+                              </tr>
+                            </thead>
+
+                            <tbody>
+                              {detailItems.map(
+                                (
+                                  item,
+                                  itemIndex
+                                ) => (
+                                  <tr
+                                    key={
+                                      itemIndex
+                                    }
+                                  >
+                                    {(detail.columns || [])
+                                      .filter(
+                                        (col) =>
+                                          col.col
+                                      )
+                                      .map(
+                                        (col) => {
+                                          const value =
+                                            item[
+                                              col.col
+                                            ] ??
+                                            item[
+                                              col.col
+                                                ?.split(
+                                                  "."
+                                                )
+                                                .pop()
+                                            ];
+
+                                          return (
+                                            <td
+                                              key={
+                                                col.col
+                                              }
+                                            >
+                                              {fmtCell(
+                                                value,
+                                                col.fmt,
+                                                locale
+                                              )}
+                                            </td>
+                                          );
+                                        }
+                                      )}
+                                  </tr>
+                                )
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
+          );
+        })}
       </tbody>
     </table>
   );

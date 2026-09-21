@@ -104,7 +104,10 @@ SCHEMA_DOC = """Output shape — a NexD report "definition":
        "useFilters": true,
        "src": {"base": "<table>", "joins": [], "where": [], "whereLink": "AND"},
        "table": {"columns": [{"col": "<column>", "label": "Column", "on": true}],
-                 "limit": 10, "sort": "<column>", "dir": "desc"}}
+                 "limit": 10, "sort": "<column>", "dir": "desc",
+                 "detail": {"enabled": true, "keyColumn": "<a plain column of this box's own base table>",
+                            "title": "Details", "limit": 20,
+                            "columns": [{"col": "<column on a directly related table>", "label": "Column"}]}}}
     ]}
   ]
 }
@@ -129,6 +132,18 @@ Rules:
   any column, for a row count).
 - "chart" boxes group by "category" (a text or date column) and aggregate "column".
 - "table" boxes list several columns — put the ones the request actually cares about first.
+- "table.detail" makes one of a table box's own columns clickable ("keyColumn"); clicking
+  a row then shows a small related list beneath it. Only add "detail" when the request
+  explicitly asks for a clickable/expandable row — e.g. "make PR number clickable to show
+  its items", "let me expand a row to see the lines". "keyColumn" must be a plain column
+  name belonging directly to this box's own base table — never a joined column, never
+  written as "table.column". Never name which table the detail list comes from — the app
+  finds it itself at click time from the link list — only name that related table's
+  *columns* in "detail.columns", and every one of those columns must actually exist on
+  some table linked (one hop, either direction) to the base table, per the "How the
+  tables link up" list. Never repeat a column that is already on the base table itself —
+  "detail" is for reaching a *different*, related table's columns, not the base table's
+  own.
 - aggregates: SUM, AVG, COUNT, "COUNT DISTINCT", MIN, MAX. chart types: bar, hbar, stacked,
   line, area, pie, donut. filter controls: text, date, daterange, select, radio, checkbox,
   toggle, number, status-tabs.
@@ -311,7 +326,19 @@ def generate_edit(prompt: str, current_definition: dict, tables: list,
                         max_tokens=8192, images=images)
 
 
-def validate_definition(definition: dict, catalogue: dict) -> None:
+def _related_tables(base_table: str, relationships) -> set:
+    """Every table one hop away from base_table, either direction — the same
+    reach get_detail_rows() itself searches at click time."""
+    out = set()
+    for r in relationships or []:
+        if r.get("from_table") == base_table:
+            out.add(r.get("to_table"))
+        elif r.get("to_table") == base_table:
+            out.add(r.get("from_table"))
+    return out
+
+
+def validate_definition(definition: dict, catalogue: dict, relationships=None) -> None:
     """Dry-run every box through the real query builder — the same
     identifier-safety pass a hand-built report goes through — plus a
     quick check on any filters, which build() does not itself see."""
@@ -335,6 +362,26 @@ def validate_definition(definition: dict, catalogue: dict) -> None:
                 build(box, filters, {}, catalogue)
             except BadDefinition as exc:
                 raise SpecError(f"Box {box.get('title') or box.get('id')!r}: {exc}")
+
+            detail = (box.get("table") or {}).get("detail") or {}
+            if box.get("kind") == "table" and detail.get("enabled"):
+                base = (box.get("src") or {}).get("base")
+                label = box.get("title") or box.get("id")
+                key_col = detail.get("keyColumn")
+                if not key_col or key_col not in catalogue.get(base, set()):
+                    raise SpecError(
+                        f"Box {label!r}: detail.keyColumn {key_col!r} is not a column "
+                        f"of its own base table {base!r}.")
+                reachable = _related_tables(base, relationships)
+                related_cols = set()
+                for t in reachable:
+                    related_cols |= catalogue.get(t, set())
+                for c in detail.get("columns") or []:
+                    col = (c.get("col") or "").split(".")[-1]
+                    if not col or col not in related_cols:
+                        raise SpecError(
+                            f"Box {label!r}: detail column {c.get('col')!r} does not "
+                            f"exist on any table linked to {base!r}.")
     if not any_box:
         raise SpecError("The generated report has no boxes.")
 
@@ -348,5 +395,5 @@ def finish_definition(definition: dict, catalogue: dict, relationships) -> list:
     validation as a working join rather than as "unknown column", while a
     column that genuinely links to nothing still fails, loudly, here."""
     notes = links.autolink(definition, catalogue, relationships)
-    validate_definition(definition, catalogue)
+    validate_definition(definition, catalogue, relationships)
     return notes

@@ -129,6 +129,7 @@ const api = {
   limit = 20,
   signal
 ) =>
+  
   call(
     `/processes/${key}/detail?parentTable=${encodeURIComponent(parentTable)}&lookupColumn=${encodeURIComponent(lookupColumn)}&value=${encodeURIComponent(value)}&detailColumns=${encodeURIComponent(detailColumns.join(","))}&limit=${limit}`,
     { signal }

@@ -157,6 +157,8 @@ const [detailValue, setDetailValue] = React.useState("");
 const [detailLoading, setDetailLoading] = React.useState(false);
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
+  const slug = window.location.pathname.split("/r/")[1] || "";
+  const [publicKey, publicToken] = slug.split("/");
 
   if (box.kind === "note") {
     return (
@@ -732,18 +734,50 @@ if (box.tableMode === "graph") {
                         setDetailValue(clickedValue);
                         setDetailItems([]);
                         setDetailLoading(true);
+                          console.log("PROCESS KEY AT DETAIL:", state.processKey);
+                          console.log("BOX ID:", box.id);
+                          console.log("BOX SRC:", box.src);
+                                                try {
+                          const isPublished = window.location.pathname.includes("/r/");
 
-                        try {
-                          const data = await api.getDetailRows(
-                            state.processKey,
-                            box?.src?.base || "",
-                            detail.keyColumn,
-                            clickedValue,
-                            (detail.columns || [])
-                              .map((col) => col.col)
-                              .filter(Boolean),
-                            detail.limit || 20
-                          );
+                          let data;
+
+                          if (isPublished) {
+                            const [, publicPath] = window.location.pathname.split("/r/");
+                            const [publicKey, publicToken] = publicPath.split("/");
+
+                            const params = new URLSearchParams({
+                              parentTable: box?.src?.base || "",
+                              lookupColumn: detail.keyColumn,
+                              value: clickedValue,
+                              detailColumns: (detail.columns || [])
+                                .map((col) => col.col)
+                                .filter(Boolean)
+                                .join(","),
+                              limit: String(detail.limit || 20),
+                            });
+
+                            const res = await fetch(
+                              `/api/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`
+                            );
+
+                            if (!res.ok) {
+                              throw new Error("Could not load public detail rows");
+                            }
+
+                            data = await res.json();
+                          } else {
+                            data = await api.getDetailRows(
+                              state.processKey,
+                              box?.src?.base || "",
+                              detail.keyColumn,
+                              clickedValue,
+                              (detail.columns || [])
+                                .map((col) => col.col)
+                                .filter(Boolean),
+                              detail.limit || 20
+                            );
+                          }
 
                           setDetailItems(data.rows || []);
                         } catch (err) {
@@ -1595,11 +1629,33 @@ function GraphTableData({ box, set }) {
 function TableData({ box, set }) {
   const { state, dispatch } = useStore();
   const c = box.table || {};
+  React.useEffect(() => {
+  const details = c.detail?.columns || [];
+
+  details.forEach((col, i) => {
+    if (!col.col || !col.col.includes(".")) return;
+
+    const actualName = col.col.split(".").pop();
+
+    if (!col.label || col.label === col.col || col.label === actualName) {
+      set(`table.detail.columns.${i}.label`, actualName);
+    }
+  });
+}, [c.detail?.columns]);
   const parentTable = box.src?.base || "";
 
   // Get columns from the selected database source
   const availableColumns = colOptions(state.catalog, box.src)
-    .map((x) => x.name);
+  .map((x) => x.name);
+
+const detailAvailableColumns = [
+  ...(state.catalog?.tables || []).flatMap((table) =>
+    (table.columns || []).map((col) => [
+      `${table.name}.${col.name}`,
+      col.name,
+    ])
+  ),
+];
 
   const columns = c.columns || [];
 
@@ -1725,14 +1781,12 @@ function TableData({ box, set }) {
                   ...availableColumns,
                 ]}
                 onChange={(v) => {
-                  set(`table.columns.${i}.col`, v);
+                  set(`table.detail.columns.${i}.col`, v);
 
-                  // Automatically use DB column name as label
-                  // only if user has not typed a custom label
-                  if (!col.label && v) {
+                  if (v) {
                     set(
-                      `table.columns.${i}.label`,
-                      v
+                      `table.detail.columns.${i}.label`,
+                      v.split(".").pop()
                     );
                   }
                 }}
@@ -1882,7 +1936,7 @@ function TableData({ box, set }) {
                     value={col.col || ""}
                     options={[
                       ["", "Select column"],
-                      ...availableColumns,
+                      ...detailAvailableColumns,
                     ]}
                     onChange={(v) => {
                       set(

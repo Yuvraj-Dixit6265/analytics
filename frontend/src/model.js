@@ -167,9 +167,22 @@ export function ensureConfigs(b) {
     columns: [],
     limit: 20,
   };
+  
 } else {
   if (!b.table.detail.table) b.table.detail.table = "";
   if (!b.table.detail.relatedColumn) b.table.detail.relatedColumn = "";
+}
+if (b.table?.detail?.columns) {
+  b.table.detail.columns = b.table.detail.columns.map((col) => {
+    if (!col.col || !col.col.includes(".")) return col;
+
+    const actualColumn = col.col.split(".").pop();
+
+    return {
+      ...col,
+      label: actualColumn,
+    };
+  });
 }
 
   if (!b.manualTable) b.manualTable = {

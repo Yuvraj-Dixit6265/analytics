@@ -118,7 +118,6 @@ function PublicShell({ slug }) {
   return (
     <div className="pane">
             <div className="pagebar">
-        <span className="pubviewtag">Shared {role ? `${role} ` : ""}view — read-only</span>
         <span className="espacer" />
         <button className="pb" disabled={exporting === "pdf"} onClick={() => exportAs("pdf")}>
           {exporting === "pdf" ? "Preparing…" : "Download PDF"}

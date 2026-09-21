@@ -424,7 +424,7 @@ function Shell() {
 
   return (
     <div className="pane">
-      <div className="wordmark"><b>NEXD</b><span>v14</span></div>
+      
 
       <div className="pagebar">
         {editing ? (
@@ -589,7 +589,7 @@ function Login({ onDone }) {
 
   return (
     <div className="pane" style={{ maxWidth: 420, paddingTop: 80 }}>
-      <div className="wordmark"><b>NEXD</b><span>v14</span></div>
+     
       <section className="hcard">
         <header><h2>Sign in</h2></header>
         <div style={{ padding: "18px 20px" }}>

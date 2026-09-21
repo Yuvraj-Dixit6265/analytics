@@ -28,7 +28,13 @@ import db
 import exporters
 import formula
 import ai_report
+import links
 from querybuilder import BadDefinition, build, build_write, preview
+
+# One probe is one query. A wide schema can infer hundreds of links, and
+# verifying every one of them on a click is not a thing to do to a production
+# reporting database — the cap keeps the check to a few seconds' work.
+PROBE_LIMIT = int(os.environ.get("LINK_PROBE_LIMIT", 40))
 
 class _SafeJSONProvider(DefaultJSONProvider):
     """MySQL hands back SUM()/AVG() as Decimal and dates as date/datetime —
@@ -43,6 +49,10 @@ class _SafeJSONProvider(DefaultJSONProvider):
         return super().default(obj)
 
 app = Flask(__name__)
+# Definitions are small; the one request that is not is an AI prompt carrying
+# attached screenshots. Bound it here so a stray upload is refused at the door
+# rather than being buffered in full first.
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_UPLOAD_BYTES", 32 * 1024 * 1024))
 CORS(
     app,
     resources={r"/api/*": {"origins": os.environ.get(
@@ -61,7 +71,7 @@ TOKEN_HOURS = int(os.environ.get("TOKEN_HOURS", 12))
 # --------------------------------------------------------------------------
 def issue(user):
     payload = {
-        "sub": user["id"],
+        "sub": str(user["id"]),
         "username": user["username"],
         "role": user["role"],
         "exp": datetime.now(timezone.utc) + timedelta(hours=TOKEN_HOURS),
@@ -193,11 +203,78 @@ def _connection_for(process=None, cid=None):
 def catalog():
     row = _connection_for(cid=request.args.get("connection_id", type=int))
     if not row:
-        return jsonify(tables=[], note="No connection configured yet.")
+        return jsonify(tables=[], relationships=[], note="No connection configured yet.")
     try:
-        return jsonify(tables=db.introspect(row))
+        tables = db.introspect(row)
     except Exception as exc:  # noqa: BLE001
-        return jsonify(tables=[], note=str(exc)[:300]), 200
+        return jsonify(tables=[], relationships=[], note=str(exc)[:300]), 200
+    try:
+        rels = db.relationships(row, tables)
+    except Exception as exc:  # noqa: BLE001
+        # The columns are the part everything else depends on. If only the key
+        # metadata is unreadable, hand back the catalogue and say so, rather
+        # than leaving the designer with no tables at all.
+        return jsonify(tables=tables, relationships=[],
+                       note=f"Table links could not be read: {str(exc)[:200]}")
+    return jsonify(tables=tables, relationships=rels)
+
+
+@app.get("/api/catalog/links")
+@auth()
+def catalog_links():
+    """How the tables link up, and — with ?probe=1 — whether those links hold
+    in the data.
+
+    Two different questions hide behind "are the tables joined properly". The
+    schema answers the first: which column ties which tables together. Only
+    the rows answer the second: a link can be declared and still match nothing,
+    which is exactly how a report comes back empty or short while every join in
+    it looks correct. Probing samples the near side and counts how many values
+    find a match, so the difference is visible instead of guessed at.
+    """
+    row = _connection_for(cid=request.args.get("connection_id", type=int))
+    if not row:
+        return jsonify(error="No data connection configured yet."), 400
+    probe = request.args.get("probe") in ("1", "true", "yes")
+    try:
+        tables = db.introspect(row)
+        cat = db.catalogue_index(tables)
+        rels = db.relationships(row, tables)
+    except Exception as exc:  # noqa: BLE001
+        return jsonify(error=str(exc)[:300]), 502
+
+    linked = {r["from_table"] for r in rels} | {r["to_table"] for r in rels}
+    out = [dict(r) for r in rels]
+
+    if probe:
+        for link in out[:PROBE_LIMIT]:
+            try:
+                sql, params = links.probe_sql(link, cat)
+                rows = db.run_report_query(row, sql, params)
+            except Exception as exc:  # noqa: BLE001
+                link["probe"] = {"ok": False, "note": str(exc)[:200]}
+                continue
+            first = rows[0] if rows else {}
+            sampled = int(first.get("sampled") or 0)
+            matched = int(first.get("matched") or 0)
+            link["probe"] = {
+                "ok": True, "sampled": sampled, "matched": matched,
+                "match_rate": round(matched / sampled, 4) if sampled else None,
+            }
+        if len(out) > PROBE_LIMIT:
+            out[PROBE_LIMIT]["probe"] = None
+
+    return jsonify(
+        relationships=out,
+        unlinked=[t["name"] for t in tables if t["name"] not in linked],
+        counts={
+            "tables": len(tables),
+            "declared": sum(1 for r in rels if r["source"] == "fk"),
+            "inferred": sum(1 for r in rels if r["source"] != "fk"),
+            "probed": PROBE_LIMIT if probe and len(out) > PROBE_LIMIT
+                      else (len(out) if probe else 0),
+        },
+    )
 
 
 # --------------------------------------------------------------------------
@@ -291,13 +368,15 @@ def ai_generate_process():
     try:
         tables = db.introspect(conn_row)
         catalogue = db.catalogue_index(tables)
-        definition = ai_report.generate_definition(prompt, tables)
-        ai_report.validate_definition(definition, catalogue)
+        rels = db.relationships(conn_row, tables)
+        definition = ai_report.generate_definition(
+            prompt, tables, rels, images=b.get("images"))
+        notes = ai_report.finish_definition(definition, catalogue, rels)
     except ai_report.SpecError as exc:
         return jsonify(error=str(exc)), 422
     except requests.RequestException as exc:
         return jsonify(error=f"Could not reach the AI service: {exc}"), 502
-    return jsonify(definition=definition, connection_id=conn_row["id"])
+    return jsonify(definition=definition, connection_id=conn_row["id"], notes=notes)
 
 
 @app.post("/api/processes/ai-edit")
@@ -317,13 +396,15 @@ def ai_edit_process():
     try:
         tables = db.introspect(conn_row)
         catalogue = db.catalogue_index(tables)
-        definition = ai_report.generate_edit(prompt, current, tables)
-        ai_report.validate_definition(definition, catalogue)
+        rels = db.relationships(conn_row, tables)
+        definition = ai_report.generate_edit(
+            prompt, current, tables, rels, images=b.get("images"))
+        notes = ai_report.finish_definition(definition, catalogue, rels)
     except ai_report.SpecError as exc:
         return jsonify(error=str(exc)), 422
     except requests.RequestException as exc:
         return jsonify(error=f"Could not reach the AI service: {exc}"), 502
-    return jsonify(definition=definition, connection_id=conn_row["id"])
+    return jsonify(definition=definition, connection_id=conn_row["id"], notes=notes)
 
 
 # --------------------------------------------------------------------------

@@ -100,8 +100,16 @@ const api = {
   deleteProcess: (key) => call(`/processes/${key}`, { method: "DELETE" }),
   aiGenerateReport: (prompt, connectionId) =>
     call("/processes/ai-generate", { method: "POST", body: { prompt, connection_id: connectionId } }),
-  aiEditReport: (prompt, definition, connectionId) =>
-    call("/processes/ai-edit", { method: "POST", body: { prompt, definition, connection_id: connectionId } }),
+  aiEditReport: (prompt, definition, connectionId, images = []) =>
+    call("/processes/ai-edit", {
+      method: "POST",
+      body: {
+        prompt,
+        definition,
+        connection_id: connectionId,
+        images,
+      },
+    }),
 
   executeAll: (key, definition, filters, signal) =>
     call(`/processes/${key}/execute-all`, {

@@ -25,16 +25,57 @@ const ROLE_OPTIONS = [
    user still has to hit Save, same as any other change made in the editor. */
 function AiEditBox({ onEdit }) {
   const [prompt, setPrompt] = React.useState("");
+  const [images, setImages] = React.useState([]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState("");
 
+  const addImages = (e) => {
+    const files = Array.from(e.target.files || []);
+    const valid = files.filter(
+      (f) =>
+        ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(f.type) &&
+        f.size <= 4 * 1024 * 1024
+    );
+
+    setImages((prev) => [...prev, ...valid].slice(0, 5));
+    e.target.value = "";
+  };
+
+  const removeImage = (index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const run = async () => {
     if (!prompt.trim() || busy) return;
+
     setBusy(true);
     setError("");
+
     try {
-      await onEdit(prompt.trim());
+      const imageData = await Promise.all(
+        images.map(
+          (file) =>
+            new Promise((resolve, reject) => {
+              const reader = new FileReader();
+
+              reader.onload = () => {
+                const base64 = String(reader.result).split(",")[1];
+                resolve({
+                  media_type: file.type,
+                  data: base64,
+                });
+              };
+
+              reader.onerror = reject;
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+
+      await onEdit(prompt.trim(), imageData);
+
       setPrompt("");
+      setImages([]);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -50,12 +91,65 @@ function AiEditBox({ onEdit }) {
           value={prompt}
           disabled={busy}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder='Describe a change — e.g. "add a pie chart of spend by vendor" or "change the monthly sales chart to a line chart"'
+          placeholder='Describe a change — e.g. "add HSN number to this PR table"'
         />
       </div>
-      <button className="pb go" disabled={busy || !prompt.trim()} onClick={run}>
-        {busy ? "Applying…" : "Edit with AI"}
-      </button>
+
+      <input
+        id="ai-image-input"
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        multiple
+        hidden
+        onChange={addImages}
+      />
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <label
+          htmlFor="ai-image-input"
+          className="pb"
+          style={{ cursor: "pointer" }}
+        >
+          📎 Add Image
+        </label>
+
+        <button
+          className="pb go"
+          disabled={busy || !prompt.trim()}
+          onClick={run}
+        >
+          {busy ? "Applying…" : "Edit with AI"}
+        </button>
+      </div>
+
+      {images.length > 0 && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          {images.map((file, index) => (
+            <div
+              key={`${file.name}-${index}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "5px 8px",
+                border: "1px solid #ddd",
+                borderRadius: 6,
+              }}
+            >
+              <span>{file.name}</span>
+              <button
+                type="button"
+                onClick={() => removeImage(index)}
+                disabled={busy}
+                style={{ cursor: "pointer" }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {error && <div className="fx bad" style={{ marginTop: 8 }}>{error}</div>}
     </div>
   );
@@ -248,8 +342,13 @@ function Shell() {
     dispatch({ type: "open", doc, key: r.process_key, connectionId: connection_id });
   };
 
-  const editReport = async (prompt) => {
-    const { definition } = await api.aiEditReport(prompt, state.doc, state.connectionId);
+  const editReport = async (prompt, images = []) => {
+    const { definition } = await api.aiEditReport(
+      prompt,
+      state.doc,
+      state.connectionId,
+      images
+    );
     dispatch({ type: "loadDraft", doc: migrate(definition) });
   };
 

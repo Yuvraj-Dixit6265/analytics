@@ -327,9 +327,14 @@ function Filter({ filter: f, index }) {
       )}
 
       <div className={`fbody pos-${pos}`} style={{ gap: `${gap}px` }}>
-        <Editable className={`fname${pos === "hidden" ? " lbl-hidden" : ""}`}
-          value={f.label} placeholder="Label" style={labelStyle}
-          onChange={(v) => set("label", v)} />
+          <Editable
+            className={`fname${pos === "hidden" ? " lbl-hidden" : ""}`}
+            value={f.label}
+            placeholder="Label"
+            editable={design}
+            style={labelStyle}
+            onChange={(v) => set("label", v)}
+          />
         {f.colon && pos !== "hidden" && (
           <span className="fcolon" style={styleObj(fst, { bg: true })}>:</span>
         )}

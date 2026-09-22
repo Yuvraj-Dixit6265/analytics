@@ -641,6 +641,64 @@ def preview_sql(key):
     )
 
     return jsonify(result)
+
+@app.get("/api/processes/<key>/filters/<client_id>/options")
+@auth()
+def filter_options(key, client_id):
+    """Return unique values for a filter's selected DB column."""
+    row = db.q1("SELECT * FROM processes WHERE process_key=%s", (key,))
+    if not row:
+        return jsonify(error="no such report"), 404
+
+    definition = row["definition"] if isinstance(row["definition"], dict) \
+        else json.loads(row["definition"])
+
+    filter_def = next(
+        (f for f in definition.get("filters", [])
+         if f.get("id") == client_id),
+        None,
+    )
+    if not filter_def:
+        return jsonify(error="no such filter"), 404
+
+    table = str(filter_def.get("table") or "").strip()
+    column = str(filter_def.get("column") or "").strip()
+
+    conn_row = _connection_for(row)
+    if not conn_row:
+        return jsonify(error="no data connection configured"), 400
+
+    try:
+        catalogue = _catalogue(conn_row)
+    except Exception as exc:
+        return jsonify(error=f"could not read the catalogue: {exc}"), 502
+
+    if table not in catalogue or column not in catalogue[table]:
+        return jsonify(options=[])
+
+    # Table/column have already been validated against the live catalogue,
+    # so quoting them here is safe.
+    sql = f"""
+        SELECT DISTINCT `{column}` AS value
+        FROM `{table}`
+        WHERE `{column}` IS NOT NULL
+          AND TRIM(CAST(`{column}` AS CHAR)) <> ''
+        ORDER BY `{column}`
+        LIMIT 1000
+    """
+
+    try:
+        rows = db.run_report_query(conn_row, sql, ())
+        options = [
+            {"value": str(r["value"]), "label": str(r["value"])}
+            for r in rows
+            if r.get("value") is not None
+        ]
+        return jsonify(options=options)
+    except Exception as exc:
+        return jsonify(error=f"could not load filter options: {str(exc)[:300]}"), 502
+
+
 @app.post("/api/processes/<key>/execute-all")
 @auth()
 def execute_all(key):

@@ -100,7 +100,6 @@ export default function Canvas() {
     <ReportName />
     <FilterBar />
 
-    <SectionNavigation />
 
     {state.doc.sections.map((sc, i) => (
       <Section key={sc.id} section={sc} index={i + 1} />
@@ -750,6 +749,49 @@ function FilterPanel({ filter: f }) {
           </Row>
           <Hint>Label left plus a fixed label width lines several filters up into a column.</Hint>
 
+          <Group>Database filter fields</Group>
+          <Row>
+            <Field label="Quick field">
+              <Select
+                value=""
+                options={[
+                  "",
+                  ...state.catalog.tables.flatMap((t) =>
+                    (t.columns || [])
+                      .filter((c) => {
+                        const n = String(c.name || "").toLowerCase()
+                          .replace(/[^a-z0-9]/g, "");
+                        return (
+                          n === "companycode" ||
+                          n === "documenttype"
+                        );
+                      })
+                      .map((c) => `${t.name}.${c.name}`)
+                  ),
+                ]}
+                onChange={(v) => {
+                  if (!v) return;
+                  const dot = v.indexOf(".");
+                  const table = v.slice(0, dot);
+                  const column = v.slice(dot + 1);
+                  const normalized = column.toLowerCase()
+                    .replace(/[^a-z0-9]/g, "");
+
+                  set("table", table);
+                  set("column", column);
+                  set(
+                    "label",
+                    normalized === "companycode"
+                      ? "Company Code"
+                      : "Document Type"
+                  );
+                  set("control", "select");
+                  set("optionSource", "auto");
+                }}
+              />
+            </Field>
+          </Row>
+
           <Group>Filters which column</Group>
           <Row>
             <Field label="Table">
@@ -983,6 +1025,7 @@ const subOff = sc.subVisible === false || !hasSectionName;
         <Editable
           className="sec-name"
           value={sc.name}
+          editable={design}
           placeholder={design ? "Untitled section" : ""}
           style={styleObj(nst, { align: true })}
           onChange={(v) => set("name", v)}
@@ -990,10 +1033,11 @@ const subOff = sc.subVisible === false || !hasSectionName;
       </div>
     )}
       {sc.rule !== false && !nameOff && <div className="sec-rule" style={ruleStyle} />}
-      {hasSectionName && (
+      {hasSectionName && (design || sc.desc) && (
         <Editable
           className={`sec-desc${subOff ? " lbl-hidden" : ""}`}
           value={sc.desc}
+          editable={design}
           placeholder="Sub-heading"
           style={styleObj(dst, { align: true })}
           onChange={(v) => set("desc", v)}

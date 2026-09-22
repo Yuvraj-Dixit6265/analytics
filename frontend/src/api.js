@@ -1,5 +1,6 @@
 /* One place that talks to the middleware. Everything else imports this. */
-const BASE = "/api";
+const BASE =
+  (import.meta.env.BASE_URL || "/").replace(/\/$/, "") + "/api";
 
 let token = localStorage.getItem("token") || "";
 

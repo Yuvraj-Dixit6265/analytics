@@ -292,45 +292,6 @@ function Filter({ filter: f, index }) {
   const cw = String(f.ctrlWidth || "").trim();
   const wide = ["radio", "checkbox"].includes(f.control) && (f.width || "auto") === "auto";
   const set = (path, value) => dispatch({ type: "set", target: "filter", id: f.id, path, value });
-  React.useEffect(() => {
-    const normalize = (v) =>
-      String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-
-    const fields = (state.catalog.tables || []).flatMap((t) =>
-      (t.columns || []).map((c) => ({
-        table: t.name,
-        column: c.name,
-        normalized: normalize(c.name),
-      }))
-    );
-
-    const company = fields.find((x) => x.normalized === "companycode");
-
-    const documentType = fields.find((x) =>
-      ["documenttype", "documenttypecode", "documenttypetext",
-       "doctype", "doctypecode", "doctypetext",
-       "purchasingdoctype"].includes(x.normalized)
-    );
-
-    const label = normalize(f.label);
-    const target =
-      label === "companycode" ? company :
-      label === "documenttype" ? documentType :
-      null;
-
-    if (
-      target &&
-      (f.table !== target.table ||
-       f.column !== target.column ||
-       f.control !== "select" ||
-       f.optionSource !== "auto")
-    ) {
-      set("table", target.table);
-      set("column", target.column);
-      set("control", "select");
-      set("optionSource", "auto");
-    }
-  }, [f.label, f.table, f.column, f.control, f.optionSource, state.catalog.tables]);
 
 
   const labelStyle = { ...styleObj(fst, { bg: true }),
@@ -395,7 +356,7 @@ function useOptions(f) {
       return () => { alive = false; };
     }
     if (!state.processKey) { setOptions([]); return () => { alive = false; }; }
-    api.filterOptions(state.processKey, f.id)
+    api.filterOptions(state.processKey, f.id, f.table, f.column)
       .then((r) => alive && setOptions(r.options || []))
       .catch((err) => {
         console.error("FILTER OPTIONS ERROR:", err);
@@ -805,8 +766,16 @@ function FilterPanel({ filter: f }) {
                         const n = String(c.name || "").toLowerCase()
                           .replace(/[^a-z0-9]/g, "");
                         return (
-                          n === "companycode" ||
-                          n === "documenttype"
+                          [
+                            "companycode",
+                            "documenttype",
+                            "documenttypecode",
+                            "documenttypetext",
+                            "doctype",
+                            "doctypecode",
+                            "doctypetext",
+                            "purchasingdoctype",
+                          ].includes(n)
                         );
                       })
                       .map((c) => `${t.name}.${c.name}`)

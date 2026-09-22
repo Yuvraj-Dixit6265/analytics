@@ -138,8 +138,11 @@ const api = {
     call(`/processes/${key}/preview-sql`, {
       method: "POST", body: { box, definition, filters },
     }),
-  filterOptions: (key, clientId) =>
-    call(`/processes/${key}/filters/${clientId}/options`),
+  filterOptions: (key, clientId, table, column) =>
+    call(`/processes/${key}/filters/${clientId}/options`
+      + (table && column
+        ? `?table=${encodeURIComponent(table)}&column=${encodeURIComponent(column)}`
+        : "")),
 
   prItems: (key, prNumber) =>
     call(`/processes/${key}/pr/${encodeURIComponent(prNumber)}/items`),

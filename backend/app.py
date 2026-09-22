@@ -645,24 +645,33 @@ def preview_sql(key):
 @app.get("/api/processes/<key>/filters/<client_id>/options")
 @auth()
 def filter_options(key, client_id):
-    """Return unique values for a filter's selected DB column."""
+    """Return unique values for a filter's selected DB column.
+
+    Prefers table/column passed directly as query params — this is what
+    lets a filter that was just configured in the browser (e.g. via the
+    "Quick field" picker) show real options immediately, without first
+    requiring a Save round-trip so the server's copy of the definition
+    knows the filter exists. Falls back to the saved definition's own
+    filter (by client_id) when no override is given, for older callers."""
     row = db.q1("SELECT * FROM processes WHERE process_key=%s", (key,))
     if not row:
         return jsonify(error="no such report"), 404
 
-    definition = row["definition"] if isinstance(row["definition"], dict) \
-        else json.loads(row["definition"])
+    table = (request.args.get("table") or "").strip()
+    column = (request.args.get("column") or "").strip()
 
-    filter_def = next(
-        (f for f in definition.get("filters", [])
-         if f.get("id") == client_id),
-        None,
-    )
-    if not filter_def:
-        return jsonify(error="no such filter"), 404
-
-    table = str(filter_def.get("table") or "").strip()
-    column = str(filter_def.get("column") or "").strip()
+    if not table or not column:
+        definition = row["definition"] if isinstance(row["definition"], dict) \
+            else json.loads(row["definition"])
+        filter_def = next(
+            (f for f in definition.get("filters", [])
+             if f.get("id") == client_id),
+            None,
+        )
+        if not filter_def:
+            return jsonify(options=[])
+        table = str(filter_def.get("table") or "").strip()
+        column = str(filter_def.get("column") or "").strip()
 
     conn_row = _connection_for(row)
     if not conn_row:

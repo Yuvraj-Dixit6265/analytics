@@ -1781,11 +1781,11 @@ const detailAvailableColumns = [
                   ...availableColumns,
                 ]}
                 onChange={(v) => {
-                  set(`table.detail.columns.${i}.col`, v);
+                  set(`table.columns.${i}.col`, v);
 
                   if (v) {
                     set(
-                      `table.detail.columns.${i}.label`,
+                      `table.columns.${i}.label`,
                       v.split(".").pop()
                     );
                   }

@@ -397,7 +397,10 @@ function useOptions(f) {
     if (!state.processKey) { setOptions([]); return () => { alive = false; }; }
     api.filterOptions(state.processKey, f.id)
       .then((r) => alive && setOptions(r.options || []))
-      .catch(() => alive && setOptions([]));
+      .catch((err) => {
+        console.error("FILTER OPTIONS ERROR:", err);
+        if (alive) setOptions([]);
+      });
     return () => { alive = false; };
   }, [state.processKey, f.id, f.optionSource, f.list, f.table, f.column, f.optTable, f.optColumn]);
   return options;

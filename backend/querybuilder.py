@@ -282,8 +282,10 @@ def filter_conditions(scope, filters, state, role_row, params):
                 parts.append(f"{col_sql} >= %s")
 
             if value.get("to"):
+                # "to" is a whole day: < next midnight, so DATETIME rows later
+                # that day (e.g. "Today", "Yesterday") are included.
                 params.append(value["to"])
-                parts.append(f"{col_sql} <= %s")
+                parts.append(f"{col_sql} < DATE_ADD(%s, INTERVAL 1 DAY)")
 
         elif control == "checkbox" and isinstance(value, list):
             params.extend(value)

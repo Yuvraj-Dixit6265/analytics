@@ -1656,7 +1656,33 @@ const detailAvailableColumns = [
     ])
   ),
 ];
+const addAllColumns = () => {
+  const allColumns = colOptions(state.catalog, box.src)
+    .map((x) => x.name)
+    .filter(Boolean);
 
+  const existing = new Set(
+    columns
+      .map((c) => c.col)
+      .filter(Boolean)
+  );
+
+  const newColumns = allColumns
+    .filter((name) => !existing.has(name))
+    .map((name) => ({
+      col: name,
+      label: name.split(".").pop(),
+      on: true,
+      fmt: "auto",
+      align: "left",
+      width: "auto",
+    }));
+
+  set("table.columns", [
+    ...columns,
+    ...newColumns,
+  ]);
+};
   const columns = c.columns || [];
 
   const addColumn = () => {
@@ -1861,13 +1887,21 @@ const detailAvailableColumns = [
         ))}
       </div>
 
-      <button
-        className="pb"
-        onClick={addColumn}
-        style={{ marginTop: 10 }}
-      >
-        + Add Column
-      </button>
+<div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+  <button
+    className="pb"
+    onClick={addColumn}
+  >
+    + Add Column
+  </button>
+
+  <button
+    className="pb"
+    onClick={addAllColumns}
+  >
+    + Add All Columns
+  </button>
+</div>
 
       <Hint>
         Add columns, connect them to database fields, rename their headings,

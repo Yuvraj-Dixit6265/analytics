@@ -149,8 +149,14 @@ function ReportName() {
           ))}
         </div>
       )}
-      <Editable className="rep-name" value={state.doc.name} placeholder="Name this report"
-        style={styleObj(st, { align: true })} onChange={(v) => set("name", v)} />
+        <Editable
+          className="rep-name"
+          value={state.doc.name}
+          placeholder="Name this report"
+          editable={design}
+          style={styleObj(st, { align: true })}
+          onChange={(v) => set("name", v)}
+        />
       {selected && state.cfgOpen && design && (
         <div className="cfg" style={{ textAlign: "left" }} onMouseDown={(e) => e.stopPropagation()}>
           <FormatPanel label="Report name" style={st} onSet={(k, v) => set(`nameStyle.${k}`, v)} />

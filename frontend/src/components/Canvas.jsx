@@ -361,15 +361,19 @@ function useOptions(f) {
       setOptions(vals.map((v) => ({ value: v, label: v })));
       return () => { alive = false; };
     }
-    if (!state.processKey) { setOptions([]); return () => { alive = false; }; }
-    api.filterOptions(state.processKey, f.id, f.table, f.column)
+    // A published link has no processKey (and no login), so it loads options
+    // through the public, link-scoped endpoint instead of the designer's one.
+    if (!state.processKey && !state.publicSlug) { setOptions([]); return () => { alive = false; }; }
+    (state.publicSlug
+      ? api.publicFilterOptions(state.publicSlug, f.id)
+      : api.filterOptions(state.processKey, f.id, f.table, f.column))
       .then((r) => alive && setOptions(r.options || []))
       .catch((err) => {
         console.error("FILTER OPTIONS ERROR:", err);
         if (alive) setOptions([]);
       });
     return () => { alive = false; };
-  }, [state.processKey, f.id, f.optionSource, f.list, f.table, f.column, f.optTable, f.optColumn]);
+  }, [state.processKey, state.publicSlug, f.id, f.optionSource, f.list, f.table, f.column, f.optTable, f.optColumn]);
   return options;
 }
 function dateString(d) {

@@ -153,6 +153,9 @@ const api = {
 
   publicDefinition: (slug, signal) => call(`/r/${slug}`, { signal }),
   
+  publicFilterOptions: (slug, clientId) =>
+    call(`/r/${slug}/filters/${clientId}/options`),
+
   publicExecute: (slug, filters, signal) =>
     call(`/r/${slug}/execute`, { method: "POST", body: { filters }, signal }),
 

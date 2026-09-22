@@ -71,7 +71,7 @@ function PublicShell({ slug }) {
         const r = await api.publicDefinition(slug);
         if (!alive) return;
         setRole(r.role);
-        dispatch({ type: "open", doc: r.definition, key: null, connectionId: null });
+        dispatch({ type: "open", doc: r.definition, key: null, connectionId: null, publicSlug: slug });
         dispatch({ type: "mode", mode: "preview" });
         setLoaded(true);
       } catch (e) {

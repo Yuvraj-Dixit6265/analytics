@@ -93,6 +93,7 @@ export function reducer(state, a) {
         connectionId: a.connectionId ?? state.connectionId,
         dirty: false, sel: null, cfgOpen: false, results: {}, filterState: {},
         published: a.published || null, mode: a.mode || "design",
+        publicSlug: a.publicSlug || null,
       };
     case "close":
       return { ...state, view: "reports", processKey: null, doc: blankDoc(),

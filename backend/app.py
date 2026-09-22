@@ -674,6 +674,12 @@ def filter_options(key, client_id):
         column = str(filter_def.get("column") or "").strip()
 
     conn_row = _connection_for(row)
+    return _distinct_column_options(conn_row, table, column)
+
+
+def _distinct_column_options(conn_row, table, column):
+    """Shared by the designer's filter_options and the public link's
+    public_filter_options, so both pages always load options the same way."""
     if not conn_row:
         return jsonify(error="no data connection configured"), 400
 
@@ -1366,6 +1372,30 @@ def execute_public(key, token):
     state = body.get("filters") or {}
     results = _execute_boxes(definition, state, conn_row, cat, allow_forms=False)
     return jsonify(results=results)
+@app.get("/api/r/<key>/<token>/filters/<client_id>/options")
+def public_filter_options(key, token, client_id):
+    """The public, no-login counterpart to filter_options. Table/column are
+    taken ONLY from this link's pinned, role-trimmed definition — never from
+    query params — so a public link cannot be used to list values from
+    arbitrary columns of the connected database."""
+    pub = _resolve_pub(key, token)
+    if not pub:
+        return jsonify(error="this link is not live"), 404
+    ver = db.q1("SELECT definition FROM process_versions "
+                "WHERE process_id=%s AND version=%s",
+                (pub["process_id"], pub["pinned_version"]))
+    definition = ver["definition"] if isinstance(ver["definition"], dict) \
+        else json.loads(ver["definition"])
+    definition = _definition_for_role(definition, pub["role"])
+    filter_def = next((f for f in definition.get("filters", [])
+                       if f.get("id") == client_id), None)
+    if not filter_def:
+        return jsonify(options=[])
+    table = str(filter_def.get("table") or "").strip()
+    column = str(filter_def.get("column") or "").strip()
+    return _distinct_column_options(_connection_for(cid=pub["connection_id"]), table, column)
+
+
 @app.get("/api/r/<key>/<token>/pr/<pr_number>/items")
 def get_public_pr_items(key, token, pr_number):
     """Return PR items through a published link."""

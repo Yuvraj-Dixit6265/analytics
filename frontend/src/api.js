@@ -41,6 +41,28 @@ async function call(path, options = {}) {
 
   return data;
 }
+async function callPublic(path, options = {}) {
+  const { body, ...rest } = options;
+
+  const res = await fetch("/api" + path, {
+    ...rest,
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(rest.headers || {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+
+  if (!res.ok) {
+    throw new Error(data.error || `${res.status} ${res.statusText}`);
+  }
+
+  return data;
+}
 
 /* Downloads (PDF/PPTX/XLSX/Table exports) */
 async function download(path, filename) {
@@ -151,14 +173,17 @@ const api = {
   unpublish: (key) => call(`/processes/${key}/unpublish`, { method: "POST" }),
   
 
-  publicDefinition: (slug, signal) => call(`/r/${slug}`, { signal }),
-  
-  publicExecute: (slug, filters, signal) =>
-    call(`/r/${slug}/execute`, { method: "POST", body: { filters }, signal }),
+publicDefinition: (slug, signal) => callPublic(`/r/${slug}`, { signal }),
+
+publicExecute: (slug, filters, signal) =>
+  callPublic(`/r/${slug}/execute`, {
+    method: "POST",
+    body: { filters },
+    signal,
+  }),
 
 publicPrItems: (slug, prNumber) =>
-  call(`/r/${slug}/pr/${encodeURIComponent(prNumber)}/items`),
-
+  callPublic(`/r/${slug}/pr/${encodeURIComponent(prNumber)}/items`),
   exportReport: (key, fmt, filters, filename) =>
     download(`/processes/${key}/export/${fmt}?filters=${encodeURIComponent(JSON.stringify(filters || {}))}`,
       filename),

@@ -756,6 +756,8 @@ if (box.tableMode === "graph") {
                                 .join(","),
                               limit: String(detail.limit || 20),
                             });
+                            const vt = new URLSearchParams(window.location.search).get("vt");
+                            if (vt) params.set("vt", vt);
 
                             const res = await fetch(
                               `/api/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`

@@ -45,6 +45,32 @@ def _quote(name):
     return f"`{name}`"
 
 
+def vendor_condition(catalogue, table, column, value, via=None):
+    """(sql, params) that restricts rows of `table` to one vendor, or None if
+    this table cannot be tied to a vendor.
+
+    Direct:   table has `column`             -> `table`.`column` = %s
+    Indirect: via[table] = "local:ref.refcol" and ref has `column`
+              -> EXISTS (SELECT 1 FROM ref WHERE ref.refcol = table.local
+                         AND ref.column = %s)
+    e.g. via = {"asn_dispatch": "po_id:portal_purchase_orders.id"} scopes every
+    dispatch row through its purchase order, with no join in the report."""
+    cols = catalogue.get(table, set())
+    if column in cols:
+        return f"{_quote(table)}.{_quote(column)} = %s", [value]
+    rule = (via or {}).get(table)
+    if not rule or ":" not in rule or "." not in rule.split(":", 1)[1]:
+        return None
+    local, target = rule.split(":", 1)
+    ref, ref_col = target.split(".", 1)
+    ref_cols = catalogue.get(ref, set())
+    if local not in cols or ref_col not in ref_cols or column not in ref_cols:
+        return None
+    return (f"EXISTS (SELECT 1 FROM {_quote(ref)} AS `_vs` "
+            f"WHERE `_vs`.{_quote(ref_col)} = {_quote(table)}.{_quote(local)} "
+            f"AND `_vs`.{_quote(column)} = %s)"), [value]
+
+
 class Scope:
     """The tables a query may currently refer to, and their columns."""
 
@@ -338,8 +364,13 @@ def _raw_select(sql, filters, state, params):
 # --------------------------------------------------------------------------
 # the three query shapes
 # --------------------------------------------------------------------------
-def build(box, filters, state, catalogue, role_row=None):
-    """Return (sql, params) for one box, or (None, None) if it runs no query."""
+def build(box, filters, state, catalogue, role_row=None, force=None):
+    """Return (sql, params) for one box, or (None, None) if it runs no query.
+
+    force: {"column": .., "value": .., "via": {..}} — a condition the caller
+    REQUIRES on every query (a vendor link's vendor). Unlike filters it never
+    silently skips: a box that cannot be tied to a vendor (see
+    vendor_condition) raises BadDefinition, so it fails closed."""
     kind = box.get("kind")
     src = box.get("src") or {}
     if kind == "note":
@@ -347,6 +378,8 @@ def build(box, filters, state, catalogue, role_row=None):
     if kind == "value" and (box.get("value") or {}).get("source") == "manual":
         return None, None
     if src.get("mode") == "sql":
+        if force:
+            raise BadDefinition("custom-SQL boxes are not available on vendor links")
         params = []
         sql = _raw_select(src.get("sql"), filters, state, params)
         return sql, params
@@ -408,6 +441,18 @@ def build(box, filters, state, catalogue, role_row=None):
     where = _own_where(scope, src, params)
     if box.get("useFilters") is not False:
         where += filter_conditions(scope, filters, state, role_row, params)
+    if force:
+        cond = None
+        for t in scope.tables:  # base table first, then joined tables
+            cond = vendor_condition(catalogue, t, force["column"], force["value"], force.get("via"))
+            if cond:
+                break
+        if not cond:
+            raise BadDefinition(
+                f"this box's table has no {force['column']} column and no vendor rule, "
+                "so it cannot be shown on a vendor link")
+        where.append(cond[0])
+        params.extend(cond[1])
 
     sql = "SELECT " + ",\n       ".join(select) + f"\nFROM   {_quote(scope.base)}"
     for j in join_sql:

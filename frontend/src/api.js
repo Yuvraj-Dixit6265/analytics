@@ -15,6 +15,12 @@ export const setToken = (t) => {
 
 export const hasToken = () => !!token;
 
+/* A vendor portal opens published links with ?vt=<signed viewer token>.
+   It rides along on every request so the backend can scope data to that
+   vendor. Absent on designer pages and on non-vendor links. */
+const viewerToken = new URLSearchParams(window.location.search).get("vt") || "";
+const viewerHeaders = viewerToken ? { "X-Viewer-Token": viewerToken } : {};
+
 async function call(path, options = {}) {
   const { body, ...rest } = options;
 
@@ -22,6 +28,7 @@ async function call(path, options = {}) {
     ...rest,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...viewerHeaders,
       ...(body !== undefined
         ? { "Content-Type": "application/json" }
         : {}),
@@ -45,9 +52,10 @@ async function call(path, options = {}) {
 /* Downloads (PDF/PPTX/XLSX/Table exports) */
 async function download(path, filename) {
   const res = await fetch(BASE + path, {
-    headers: token
-      ? { Authorization: `Bearer ${token}` }
-      : {},
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...viewerHeaders,
+    },
   });
 
   if (!res.ok) {

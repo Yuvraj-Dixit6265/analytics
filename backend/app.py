@@ -20,7 +20,8 @@ from decimal import Decimal
 from functools import wraps
 from flask.json.provider import DefaultJSONProvider
 import jwt
-from flask import Flask, g, jsonify, request
+from urllib.parse import quote
+from flask import Flask, abort, g, has_request_context, jsonify, make_response, request
 from flask_cors import CORS
 from werkzeug.security import check_password_hash
 import db, links
@@ -29,7 +30,7 @@ import exporters
 import formula
 import ai_report
 import links
-from querybuilder import BadDefinition, build, build_write, preview
+from querybuilder import vendor_condition, BadDefinition, build, build_write, preview
 
 # One probe is one query. A wide schema can infer hundreds of links, and
 # verifying every one of them on a click is not a thing to do to a production
@@ -414,7 +415,7 @@ def _catalogue(conn_row):
     return db.catalogue_index(db.introspect(conn_row))
 
 
-def _run_box(box, definition, state, conn_row, cat, role_row, values):
+def _run_box(box, definition, state, conn_row, cat, role_row, values, force=None):
     """Return the finished payload for one box."""
     kind = box.get("kind")
         # ------------------------------------------------------------
@@ -492,7 +493,7 @@ def _run_box(box, definition, state, conn_row, cat, role_row, values):
         ok, note = formula.check(expr, cols)
         if not ok:
             return {"error": note}
-        sql, params = build(box, definition.get("filters"), state, cat, role_row)
+        sql, params = build(box, definition.get("filters"), state, cat, role_row, force)
         aggregates = {}
         if sql:
             rows = db.run_report_query(conn_row, sql, params)
@@ -504,7 +505,7 @@ def _run_box(box, definition, state, conn_row, cat, role_row, values):
         except formula.FormulaError as exc:
             return {"error": str(exc)}
 
-    sql, params = build(box, definition.get("filters"), state, cat, role_row)
+    sql, params = build(box, definition.get("filters"), state, cat, role_row, force)
     if sql is None:
         return {"value": None}
     rows = db.run_report_query(conn_row, sql, params)
@@ -515,7 +516,7 @@ def _run_box(box, definition, state, conn_row, cat, role_row, values):
     return {"rows": rows}
 
 
-def _execute_boxes(definition, state, conn_row, cat, allow_forms=True):
+def _execute_boxes(definition, state, conn_row, cat, allow_forms=True, force=None):
     """Run every box in a definition and return {box_id: payload}. Shared by
     the authenticated editor's execute-all and the public, role-scoped
     viewer, so the two can never quietly drift apart from each other."""
@@ -534,7 +535,7 @@ def _execute_boxes(definition, state, conn_row, cat, allow_forms=True):
         if not allow_forms and box.get("kind") == "form":
             continue  # a public link never gets a box that can write data
         try:
-            payload = _run_box(box, definition, state, conn_row, cat, None, values)
+            payload = _run_box(box, definition, state, conn_row, cat, None, values, force)
         except BadDefinition as exc:
             payload = {"error": str(exc)}
         except Exception as exc:  # noqa: BLE001
@@ -677,7 +678,7 @@ def filter_options(key, client_id):
     return _distinct_column_options(conn_row, table, column)
 
 
-def _distinct_column_options(conn_row, table, column):
+def _distinct_column_options(conn_row, table, column, vendor_id=None):
     """Shared by the designer's filter_options and the public link's
     public_filter_options, so both pages always load options the same way."""
     if not conn_row:
@@ -693,17 +694,31 @@ def _distinct_column_options(conn_row, table, column):
 
     # Table/column have already been validated against the live catalogue,
     # so quoting them here is safe.
+    # On a vendor link, a table that carries the vendor column only offers
+    # that vendor's values. A table without it could hold other vendors'
+    # data (invoice numbers, vehicles...), so it offers nothing, unless it is
+    # listed in VENDOR_SCOPE_REFERENCE_TABLES as shared master data.
+    vendor_sql, vendor_params = "", ()
+    if vendor_id is not None:
+        cond = vendor_condition(catalogue, table, VENDOR_SCOPE_COLUMN, vendor_id, VENDOR_SCOPE_VIA)
+        if cond:
+            vendor_sql = "AND " + cond[0]
+            vendor_params = tuple(cond[1])
+        elif table not in VENDOR_SCOPE_REFERENCE_TABLES:
+            return jsonify(options=[])
+
     sql = f"""
         SELECT DISTINCT `{column}` AS value
         FROM `{table}`
         WHERE `{column}` IS NOT NULL
           AND TRIM(CAST(`{column}` AS CHAR)) <> ''
+          {vendor_sql}
         ORDER BY `{column}`
         LIMIT 1000
     """
 
     try:
-        rows = db.run_report_query(conn_row, sql, ())
+        rows = db.run_report_query(conn_row, sql, vendor_params)
         options = [
             {"value": str(r["value"]), "label": str(r["value"])}
             for r in rows
@@ -1223,10 +1238,83 @@ def _resolve_pub(key, token):
     it belongs to). Looked up by two separate URL segments — key and token
     are never glued into one string, so a token that happens to contain a
     hyphen or slash of its own can never corrupt the lookup."""
-    return db.q1(
+    pub = db.q1(
         "SELECT pub.*, p.process_key, p.connection_id "
         "FROM publications pub JOIN processes p ON p.id = pub.process_id "
         "WHERE p.process_key=%s AND pub.token=%s AND pub.is_active=1", (key, token))
+    if pub:
+        _attach_vendor_scope(pub)
+    return pub
+
+
+# --------------------------------------------------------------------------
+# vendor scoping for published links
+# --------------------------------------------------------------------------
+# When VENDOR_SCOPE_ENFORCE=1, a link published for the "vendor" role only
+# opens with a viewer token that the vendor portal signs with JWT_SECRET:
+#   {"vendor_id": ..., "aud": "nexd-vendor-view", "exp": ...}
+# Every query that link runs is then forced to VENDOR_SCOPE_COLUMN = vendor_id.
+# The "aud" claim is what keeps this token from ever passing @auth() on the
+# designer's endpoints (PyJWT rejects an aud it was not told to expect).
+VENDOR_SCOPE_ENFORCE = os.environ.get("VENDOR_SCOPE_ENFORCE", "0") == "1"
+VENDOR_SCOPE_COLUMN = os.environ.get("VENDOR_SCOPE_COLUMN", "vendor_id")
+VENDOR_TOKEN_AUD = "nexd-vendor-view"
+# Tables with no vendor column of their own, and how to reach one, e.g.
+#   VENDOR_SCOPE_VIA=asn_dispatch=po_id:portal_purchase_orders.id
+# (comma-separate several). Every report on such a table is scoped
+# automatically; nothing has to be joined in the report itself.
+VENDOR_SCOPE_VIA = dict(
+    part.strip().split("=", 1)
+    for part in os.environ.get("VENDOR_SCOPE_VIA", "").split(",")
+    if "=" in part
+)
+VENDOR_SCOPE_REFERENCE_TABLES = {
+    t.strip() for t in os.environ.get("VENDOR_SCOPE_REFERENCE_TABLES", "").split(",") if t.strip()
+}
+
+
+def _attach_vendor_scope(pub):
+    """Sets pub["vendor_id"] (None = unscoped) and pub["viewer_token"].
+    Refuses the request with 403 when a vendor link has no valid token."""
+    pub["vendor_id"], pub["viewer_token"] = None, None
+    if not VENDOR_SCOPE_ENFORCE or pub.get("role") != "vendor":
+        return
+    if not has_request_context():
+        return  # callers outside a request (the scheduler) must check pub["role"] themselves
+    raw = request.headers.get("X-Viewer-Token") or request.args.get("vt") or ""
+
+    def refuse(msg):
+        abort(make_response(jsonify(error=msg), 403))
+
+    if not raw:
+        refuse("open this report from the vendor portal")
+    try:
+        claims = jwt.decode(raw, JWT_SECRET, algorithms=["HS256"],
+                            audience=VENDOR_TOKEN_AUD,
+                            options={"require": ["exp", "aud"]})
+    except jwt.ExpiredSignatureError:
+        refuse("your session has expired; reopen this report from the vendor portal")
+    except jwt.InvalidTokenError:
+        refuse("this report link is not valid for your account")
+    vendor_id = claims.get("vendor_id")
+    if vendor_id in (None, ""):
+        refuse("this report link is not valid for your account")
+    pub["vendor_id"], pub["viewer_token"] = str(vendor_id), raw
+
+
+def _vendor_force(pub):
+    if not pub.get("vendor_id"):
+        return None
+    return {"column": VENDOR_SCOPE_COLUMN, "value": pub["vendor_id"], "via": VENDOR_SCOPE_VIA}
+
+
+def _public_page_url(frontend_base_url, key, token, pub):
+    """The URL the headless browser renders for PDFs; carries the viewer
+    token so the rendered page is scoped exactly like the viewer's own."""
+    url = f"{frontend_base_url}/r/{key}/{token}"
+    if pub.get("viewer_token"):
+        url += "?vt=" + quote(pub["viewer_token"], safe="")
+    return url
 
 
 # --------------------------------------------------------------------------
@@ -1370,7 +1458,8 @@ def execute_public(key, token):
         return jsonify(error=f"could not read the catalogue: {exc}"), 502
 
     state = body.get("filters") or {}
-    results = _execute_boxes(definition, state, conn_row, cat, allow_forms=False)
+    results = _execute_boxes(definition, state, conn_row, cat, allow_forms=False,
+                             force=_vendor_force(pub))
     return jsonify(results=results)
 @app.get("/api/r/<key>/<token>/filters/<client_id>/options")
 def public_filter_options(key, token, client_id):
@@ -1393,7 +1482,8 @@ def public_filter_options(key, token, client_id):
         return jsonify(options=[])
     table = str(filter_def.get("table") or "").strip()
     column = str(filter_def.get("column") or "").strip()
-    return _distinct_column_options(_connection_for(cid=pub["connection_id"]), table, column)
+    return _distinct_column_options(_connection_for(cid=pub["connection_id"]), table, column,
+                                    vendor_id=pub["vendor_id"])
 
 
 @app.get("/api/r/<key>/<token>/pr/<pr_number>/items")
@@ -1409,7 +1499,18 @@ def get_public_pr_items(key, token, pr_number):
     if not conn_row:
         return jsonify(error="no data connection configured"), 400
 
-    sql = """
+    vendor_sql, vendor_params = "", ()
+    if pub["vendor_id"]:
+        try:
+            cat = _catalogue(conn_row)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify(error=f"could not read the catalogue: {exc}"), 502
+        if VENDOR_SCOPE_COLUMN not in cat.get("purchase_requisitions", set()):
+            return jsonify(error="PR items are not available on vendor links"), 403
+        vendor_sql = f"AND pr.`{VENDOR_SCOPE_COLUMN}` = %s"
+        vendor_params = (pub["vendor_id"],)
+
+    sql = f"""
         SELECT
             pri.id,
             pri.material_id,
@@ -1422,6 +1523,7 @@ def get_public_pr_items(key, token, pr_number):
         INNER JOIN purchase_requisitions pr
             ON pr.id = pri.purchase_requisition_id
         WHERE pr.pr_number = %s
+          {vendor_sql}
         ORDER BY pri.id
     """
 
@@ -1429,7 +1531,7 @@ def get_public_pr_items(key, token, pr_number):
         rows = db.run_report_query(
             conn_row,
             sql,
-            (pr_number,),
+            (pr_number,) + vendor_params,
         )
 
         return jsonify(rows=rows)
@@ -1461,6 +1563,25 @@ def get_public_detail_rows(key, token):
     if not pub:
         return jsonify(error="this link is not live"), 404
 
+    # Only the detail setups this link's own report defines may run: the
+    # table, key column and detail columns all come from the URL, so without
+    # this check any link could read columns from any table.
+    ver = db.q1("SELECT definition FROM process_versions "
+                "WHERE process_id=%s AND version=%s",
+                (pub["process_id"], pub["pinned_version"]))
+    definition = ver["definition"] if isinstance(ver["definition"], dict) \
+        else json.loads(ver["definition"])
+    definition = _definition_for_role(definition, pub["role"])
+    allowed = set()
+    for sec in definition.get("sections", []):
+        for b in sec.get("boxes", []):
+            d = (b.get("table") or {}).get("detail") or {}
+            if (b.get("src") or {}).get("base") == parent_table \
+                    and d.get("keyColumn") == lookup_column:
+                allowed |= {c.get("col") for c in d.get("columns") or [] if c.get("col")}
+    if not allowed or not set(requested_columns) <= allowed:
+        return jsonify(error="this detail view is not part of this report"), 403
+
     conn_row = _connection_for(
         cid=pub["connection_id"]
     )
@@ -1478,6 +1599,15 @@ def get_public_detail_rows(key, token):
 
         if lookup_column not in catalogue[parent_table]:
             return jsonify(error="invalid lookup column"), 400
+
+        vendor_sql, vendor_params = "", ()
+        if pub["vendor_id"]:
+            cond = vendor_condition(catalogue, parent_table, VENDOR_SCOPE_COLUMN,
+                                    pub["vendor_id"], VENDOR_SCOPE_VIA)
+            if not cond:
+                return jsonify(error="this detail view is not available on vendor links"), 403
+            vendor_sql = "AND " + cond[0]
+            vendor_params = tuple(cond[1])
 
         # Convert:
         # cart.material_id -> material_id
@@ -1589,6 +1719,7 @@ def get_public_detail_rows(key, token):
                 ON `{parent_table}`.`{parent_join_column}`
                 = `{detail_table}`.`{detail_join_column}`
             WHERE `{parent_table}`.`{lookup_column}` = %s
+              {vendor_sql}
             LIMIT %s
         """
 
@@ -1605,7 +1736,7 @@ def get_public_detail_rows(key, token):
         )
 
         with db.reporting(conn_row) as cur:
-            cur.execute(sql, (value, limit))
+            cur.execute(sql, (value,) + vendor_params + (limit,))
             rows = cur.fetchall()
 
         return jsonify(rows=db.clean(rows))
@@ -1662,6 +1793,7 @@ def export_public_report(key, token, fmt):
         conn_row,
         cat,
         allow_forms=False,
+        force=_vendor_force(pub),
     )
 
     sections = _render_boxes(definition, results)
@@ -1688,11 +1820,9 @@ def export_public_report(key, token, fmt):
             "http://localhost:5173"
         ).rstrip("/")
 
-        public_url = (
-            f"{frontend_base_url}/r/{key}/{token}"
-        )
+        public_url = _public_page_url(frontend_base_url, key, token, pub)
 
-        print("PDF PUBLIC URL:", public_url)
+        print("PDF PUBLIC URL:", f"{frontend_base_url}/r/{key}/{token}")
 
         data = exporters.build_browser_pdf(public_url)
 
@@ -1758,6 +1888,11 @@ def _generate_and_send_report(pub, key, token, recipient, custom_message="", fil
     if not ver:
         return False, "published version not found", {}
 
+    # A vendor link without a verified vendor (e.g. a scheduled send, which
+    # has no viewer) would otherwise render every vendor's data.
+    if VENDOR_SCOPE_ENFORCE and pub.get("role") == "vendor" and not pub.get("vendor_id"):
+        return False, "vendor links can only be emailed by the vendor while vendor scoping is on", {}
+
     definition = (
         ver["definition"]
         if isinstance(ver["definition"], dict)
@@ -1806,6 +1941,7 @@ def _generate_and_send_report(pub, key, token, recipient, custom_message="", fil
             conn_row,
             cat,
             allow_forms=False,
+            force=_vendor_force(pub),
         )
 
     except Exception as exc:
@@ -1821,13 +1957,11 @@ def _generate_and_send_report(pub, key, token, recipient, custom_message="", fil
         "http://localhost:5173"
     ).rstrip("/")
 
-    public_url = (
-        f"{frontend_base_url}/r/{key}/{token}"
-    )
+    public_url = _public_page_url(frontend_base_url, key, token, pub)
 
     print(
         "EMAIL PDF PUBLIC URL:",
-        public_url
+        f"{frontend_base_url}/r/{key}/{token}"
     )
 
     try:

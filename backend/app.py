@@ -49,6 +49,16 @@ class _SafeJSONProvider(DefaultJSONProvider):
             return obj.isoformat()
         return super().default(obj)
 
+# Error monitoring (Bugsink, Sentry protocol). Off unless SENTRY_DSN is set in the environment.
+if os.environ.get("SENTRY_DSN"):
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=os.environ["SENTRY_DSN"],
+        environment="production",
+        send_default_pii=False,
+        traces_sample_rate=0,
+    )
+
 app = Flask(__name__)
 # Definitions are small; the one request that is not is an AI prompt carrying
 # attached screenshots. Bound it here so a stray upload is refused at the door

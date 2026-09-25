@@ -44,23 +44,79 @@ def _quote(name):
         raise BadDefinition(f"not a usable identifier: {name!r}")
     return f"`{name}`"
 
-
 def vendor_condition(catalogue, table, column, value, via=None):
-    """(sql, params) that restricts rows of `table` to one vendor, or None if
-    this table cannot be tied to a vendor.
+    """Return (sql, params) that restricts `table` to one vendor.
 
-    Direct:   table has `column`             -> `table`.`column` = %s
-    Indirect: via[table] = "local:ref.refcol" and ref has `column`
-              -> EXISTS (SELECT 1 FROM ref WHERE ref.refcol = table.local
-                         AND ref.column = %s)
-    e.g. via = {"asn_dispatch": "po_id:portal_purchase_orders.id"} scopes every
-    dispatch row through its purchase order, with no join in the report."""
+    Supported vendor relationships:
+      1. Direct: table.vendor_id = logged-in vendor_id
+      2. Explicit VENDOR_SCOPE_VIA relationship
+      3. BP mapping:
+         table.bp_no = vendor_master.bp_no
+         where vendor_master.vendor_id = logged-in vendor_id
+
+    The BP mapping is only used when the target table actually has
+    `bp_no`. Existing direct and VENDOR_SCOPE_VIA behavior remains unchanged.
+    """
     cols = catalogue.get(table, set())
+
+    # 1. Direct vendor_id relationship.
     if column in cols:
         return f"{_quote(table)}.{_quote(column)} = %s", [value]
+
+    # 2. Existing explicit relationship, e.g. ASN -> PO -> vendor_id.
     rule = (via or {}).get(table)
-    if not rule or ":" not in rule or "." not in rule.split(":", 1)[1]:
-        return None
+    if rule and ":" in rule and "." in rule.split(":", 1)[1]:
+        local, target = rule.split(":", 1)
+        ref, ref_col = target.split(".", 1)
+        ref_cols = catalogue.get(ref, set())
+
+        if (
+            local in cols
+            and ref_col in ref_cols
+            and column in ref_cols
+        ):
+            return (
+                f"EXISTS (SELECT 1 FROM {_quote(ref)} AS `_vs` "
+                f"WHERE `_vs`.{_quote(ref_col)} = {_quote(table)}.{_quote(local)} "
+                f"AND `_vs`.{_quote(column)} = %s)"
+            ), [value]
+
+    # 3. Vendor Master BP mapping.
+    #
+    # Only activate this path for a table that actually exposes bp_no.
+    # vendor_master is used as the canonical vendor_id -> bp_no bridge.
+    if "bp_no" in cols:
+        vm_cols = catalogue.get("vendor_master", set())
+        if {"vendor_id", "bp_no"}.issubset(vm_cols):
+            return (
+                f"EXISTS ("
+                f"SELECT 1 FROM {_quote('vendor_master')} AS `_vm` "
+                f"WHERE `_vm`.{_quote('vendor_id')} = %s "
+                f"AND `_vm`.{_quote('bp_no')} = {_quote(table)}.{_quote('bp_no')}"
+                f")"
+            ), [value]
+        # 4. Supplier registration mapping through Vendor Master.
+    #
+    # supplier_registration does not carry vendor_id/bp_no itself.
+    # vendor_master.supplier_registration_id identifies the registration
+    # belonging to the logged-in vendor.
+    if table == "supplier_registration":
+        vm_cols = catalogue.get("vendor_master", set())
+        sr_cols = catalogue.get("supplier_registration", set())
+
+        if {
+            "vendor_id",
+            "supplier_registration_id",
+        }.issubset(vm_cols) and "id" in sr_cols:
+            return (
+                f"EXISTS ("
+                f"SELECT 1 FROM {_quote('vendor_master')} AS `_vm` "
+                f"WHERE `_vm`.{_quote('vendor_id')} = %s "
+                f"AND `_vm`.{_quote('supplier_registration_id')} = "
+                f"{_quote(table)}.{_quote('id')}"
+                f")"
+            ), [value]
+    return None
     local, target = rule.split(":", 1)
     ref, ref_col = target.split(".", 1)
     ref_cols = catalogue.get(ref, set())

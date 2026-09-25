@@ -30,7 +30,14 @@ import exporters
 import formula
 import ai_report
 import links
-from querybuilder import vendor_condition, BadDefinition, build, build_write, preview
+from querybuilder import (
+    vendor_condition,
+    BadDefinition,
+    Scope,
+    build,
+    build_write,
+    preview,
+)
 
 # One probe is one query. A wide schema can infer hundreds of links, and
 # verifying every one of them on a click is not a thing to do to a production
@@ -1394,35 +1401,154 @@ def unpublish(key):
         db.execute("UPDATE publications SET is_active=0 WHERE process_id=%s", (row["id"],))
     return jsonify(ok=True)
 
+def _vendor_report_compatible(definition, catalogue):
+    """Return True when every data-producing box in a report can be
+    restricted to a vendor.
 
+    This is only a capability check. It never uses a real vendor ID and
+    never executes a query.
+    """
+    boxes = [
+        box
+        for section in definition.get("sections", [])
+        for box in section.get("boxes", [])
+        if _visible(box, "vendor")
+    ]
+
+    boxes_by_id = {
+        box.get("id"): box
+        for box in boxes
+        if box.get("id")
+    }
+
+    def box_compatible(box, seen=None):
+        if not box:
+            return True
+
+        if seen is None:
+            seen = set()
+
+        box_id = box.get("id")
+        if box_id:
+            if box_id in seen:
+                return True
+            seen.add(box_id)
+
+        kind = box.get("kind")
+        src = box.get("src") or {}
+
+        # Notes and manually-entered values query no data.
+        if kind == "note":
+            return True
+
+        if kind == "value":
+            value_cfg = box.get("value") or {}
+
+            if value_cfg.get("source") == "manual":
+                return True
+
+        # Charts built from existing value boxes do not query their own table.
+        if kind == "chart":
+            chart_cfg = box.get("chart") or {}
+
+            if chart_cfg.get("source") == "value_boxes":
+                selected = chart_cfg.get("valueBoxes") or []
+
+                return all(
+                    box_compatible(
+                        boxes_by_id.get(box_id),
+                        set(seen),
+                    )
+                    for box_id in selected
+                )
+
+        # Custom SQL is currently rejected by build() for vendor links.
+        if src.get("mode") == "sql":
+            return False
+
+        # No data source means this box does not require vendor scoping.
+        if not src.get("base"):
+            return True
+
+        scope = Scope(catalogue, src["base"])
+
+        # The query is vendor-compatible when at least one table in its
+        # scope can be connected to the logged-in vendor.
+        for table in scope.tables:
+            if vendor_condition(
+                catalogue,
+                table,
+                VENDOR_SCOPE_COLUMN,
+                "__vendor_visibility_check__",
+                VENDOR_SCOPE_VIA,
+            ):
+                return True
+
+        return False
+
+    return all(box_compatible(box) for box in boxes)
 @app.get("/api/processes/published")
 @auth()
 def list_published():
-    """Every currently-active publication for one role, for a trusted server-side caller only
-    (behind @auth() — the vendor_portal employee/vendor portals reach this via backend_java's own
-    service credential, never directly from an employee's browser). Unlike /api/r/<key>/<token>,
-    this is a listing/discovery endpoint, so it stays authenticated rather than public — a
-    published report shouldn't be enumerable by anyone who doesn't already hold its link.
-    Returns the full working URL (with the /analytics prefix nginx actually proxies) rather than
-    the bare token, since the caller is meant to use it directly, not re-derive it."""
+    """Every currently-active publication for one role, for a trusted
+    server-side caller only."""
     role = request.args.get("role", "")
     if not role:
         return jsonify(error="role is required"), 400
+
     rows = db.qall(
-        "SELECT p.process_key, p.name, p.updated_at, pub.token "
-        "FROM publications pub JOIN processes p ON p.id = pub.process_id "
-        "WHERE pub.role=%s AND pub.is_active=1 ORDER BY p.updated_at DESC",
-        (role,))
-    return jsonify(reports=[
-        {
+        "SELECT p.process_key, p.name, p.updated_at, pub.token, "
+        "pub.pinned_version, p.connection_id, p.id AS process_id "
+        "FROM publications pub "
+        "JOIN processes p ON p.id = pub.process_id "
+        "WHERE pub.role=%s AND pub.is_active=1 "
+        "ORDER BY p.updated_at DESC",
+        (role,),
+    )
+
+    reports = []
+
+    for r in rows:
+        if role == "vendor":
+            version_row = db.q1(
+                "SELECT definition "
+                "FROM process_versions "
+                "WHERE process_id=%s AND version=%s",
+                (r["process_id"], r["pinned_version"]),
+            )
+
+            if not version_row:
+                continue
+
+            definition = (
+                version_row["definition"]
+                if isinstance(version_row["definition"], dict)
+                else json.loads(version_row["definition"])
+            )
+
+            conn_row = _connection_for({
+                "connection_id": r["connection_id"]
+            })
+
+            if not conn_row:
+                continue
+
+            try:
+                catalogue = _catalogue(conn_row)
+            except Exception:
+                continue
+
+            if not _vendor_report_compatible(definition, catalogue):
+                continue
+
+        reports.append({
             "key": r["process_key"],
             "name": r["name"],
             "updatedAt": r["updated_at"],
             "url": f"/analytics/r/{r['process_key']}/{r['token']}",
-        }
-        for r in rows
-    ])
+        })
 
+    return jsonify(reports=reports)
 
 @app.get("/api/r/<key>/<token>")
 def resolve_public(key, token):

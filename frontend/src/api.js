@@ -142,6 +142,30 @@ const api = {
     `/processes/${key}/detail?parentTable=${encodeURIComponent(parentTable)}&lookupColumn=${encodeURIComponent(lookupColumn)}&value=${encodeURIComponent(value)}&detailColumns=${encodeURIComponent(detailColumns.join(","))}&limit=${limit}`,
     { signal }
   ),
+
+
+  getReportViewRelatedRows: (
+    key,
+    boxId,
+    sectionId,
+    record,
+    filters = {},
+    limit = 20,
+    signal
+  ) =>
+    call(`/processes/${key}/report-view-related`, {
+      method: "POST",
+      body: {
+        boxId,
+        sectionId,
+        record,
+        filters,
+        limit,
+      },
+      signal,
+    }),
+
+
   previewSql: (key, box, definition, filters) =>
     call(`/processes/${key}/preview-sql`, {
       method: "POST", body: { box, definition, filters },

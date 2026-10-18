@@ -153,10 +153,376 @@ function Body({ box }) {
   const publicPath = window.location.pathname.match(/^\/(?:analytics\/)?r\/([^/]+)\/([^/]+)/);
   const publicSlug = publicPath ? `${publicPath[1]}/${publicPath[2]}` : null;
   const [detailItems, setDetailItems] = React.useState(null);
-const [detailValue, setDetailValue] = React.useState("");
-const [detailLoading, setDetailLoading] = React.useState(false);
+  const [detailValue, setDetailValue] = React.useState("");
+  const [detailLoading, setDetailLoading] = React.useState(false);
+  const [reportSearchTerm, setReportSearchTerm] = React.useState("");
+  const [reportPage, setReportPage] = React.useState(1);
+  const [selectedReportRecord, setSelectedReportRecord] = React.useState(null);
+  const [relatedRows, setRelatedRows] = React.useState({});
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
+
+React.useEffect(() => {
+  if (!selectedReportRecord || box.kind !== "reportView") return;
+
+  const sections = (box.reportView?.popupSections || []).filter(
+    (section) => section.type === "relatedTable"
+  );
+
+  if (!sections.length) return;
+
+  let cancelled = false;
+  const controller = new AbortController();
+
+  async function loadRelatedRows() {
+    const initial = {};
+    sections.forEach((section) => {
+      initial[section.id] = { loading: true, rows: [], error: "" };
+    });
+    setRelatedRows((previous) => ({ ...previous, ...initial }));
+
+    await Promise.all(
+      sections.map(async (section) => {
+        try {
+          if (!section.id) {
+            throw new Error("Save this popup section before using it.");
+          }
+
+          const data = publicSlug
+            ? await api.publicReportViewRelatedRows(
+                publicSlug,
+                box.id,
+                section.id,
+                selectedReportRecord,
+                state.filterState,
+                100,
+                controller.signal
+              )
+            : await api.getReportViewRelatedRows(
+                state.processKey,
+                box.id,
+                section.id,
+                selectedReportRecord,
+                state.filterState,
+                100,
+                controller.signal
+              );
+
+          if (!cancelled) {
+            setRelatedRows((previous) => ({
+              ...previous,
+              [section.id]: {
+                loading: false,
+                rows: data.rows || [],
+                error: "",
+              },
+            }));
+          }
+        } catch (error) {
+          if (cancelled || error.name === "AbortError") return;
+
+          setRelatedRows((previous) => ({
+            ...previous,
+            [section.id]: {
+              loading: false,
+              rows: [],
+              error: error.message || "Could not load related rows.",
+            },
+          }));
+        }
+      })
+    );
+  }
+
+  loadRelatedRows();
+
+  return () => {
+    cancelled = true;
+    controller.abort();
+  };
+}, [
+  selectedReportRecord,
+  box.id,
+  box.kind,
+  JSON.stringify(box.reportView?.popupSections || []),
+  publicSlug,
+  state.processKey,
+  JSON.stringify(state.filterState),
+]);
+
+    if (box.kind === "reportView") {
+    const config = box.reportView || {};
+    const rows = result?.rows || [];
+    const columns = (config.columns || [])
+      .filter((col) => col.col);
+
+    const alias = (name) => name.replace(/\./g, "__");
+
+    const filteredRows = rows.filter((row) => {
+      if (!config.search || !reportSearchTerm.trim()) return true;
+
+      const query = reportSearchTerm.toLowerCase();
+
+      return columns.some((col) =>
+        String(row[alias(col.col)] ?? row[col.col] ?? "")
+          .toLowerCase()
+          .includes(query)
+      );
+    });
+
+    const pageSize = Math.max(1, Number(config.pageSize) || 10);
+    const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
+    const currentPage = Math.min(reportPage, totalPages);
+    const pageRows = config.pagination
+      ? filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+      : filteredRows;
+
+    return (
+      <div className="report-view">
+        {config.search && (
+          <input
+            type="search"
+            className="report-view-search"
+            placeholder="Search records..."
+            value={reportSearchTerm}
+            onChange={(e) => {
+              setReportSearchTerm(e.target.value);
+              setReportPage(1);
+            }}
+          />
+        )}
+
+        <div className="rt-table-wrap">
+          <table className="rt">
+            <thead>
+              <tr>
+                {columns.map((col) => (
+                  <th key={col.col}>{col.label || col.col}</th>
+                ))}
+              </tr>
+            </thead>
+
+            <tbody>
+              {pageRows.map((row, index) => (
+                <tr
+                  key={index}
+                  onClick={() => setSelectedReportRecord(row)}
+                  style={{ cursor: "pointer" }}
+                >
+                  {columns.map((col) => {
+                    const value = row[alias(col.col)] ?? row[col.col];
+                    const isClickable =
+                      config.clickableColumn === col.col && value != null;
+
+                    return (
+                      <td key={col.col}>
+                        {isClickable ? (
+                          <span
+                            className="report-view-clickable-cell"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setSelectedReportRecord(row)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                setSelectedReportRecord(row);
+                              }
+                            }}
+                          >
+                            {fmtCell(value, col.fmt || "auto", locale)}
+                          </span>
+                        ) : (
+                          fmtCell(value, col.fmt || "auto", locale)
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+
+              {!pageRows.length && (
+                <tr>
+                  <td colSpan={Math.max(1, columns.length)}>
+                    {result?.error || "No matching records found."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {config.pagination && filteredRows.length > 0 && (
+          <div className="report-view-pagination">
+            <span>
+              {filteredRows.length} records · Page {currentPage} of {totalPages}
+            </span>
+
+            <button
+              className="pb"
+              disabled={currentPage <= 1}
+              onClick={() => setReportPage((p) => Math.max(1, p - 1))}
+            >
+              Previous
+            </button>
+
+            <button
+              className="pb"
+              disabled={currentPage >= totalPages}
+              onClick={() => setReportPage((p) => Math.min(totalPages, p + 1))}
+            >
+              Next
+            </button>
+          </div>
+        )}
+
+
+        {selectedReportRecord && (
+          <div
+            className="report-view-overlay"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setSelectedReportRecord(null);
+            }}
+          >
+            <div className="report-view-modal" role="dialog" aria-modal="true">
+              <div className="report-view-modal-header">
+                <h3>{config.detailTitle || "Record Details"}</h3>
+                <button
+                  className="xbtn"
+                  onClick={() => setSelectedReportRecord(null)}
+                  aria-label="Close details"
+                >
+                  ×
+                </button>
+              </div>
+
+              {(config.popupSections || []).length > 0 ? (
+                <div className="report-view-popup-sections">
+                  {config.popupSections.map((section, sectionIndex) => {
+                    const sectionColumns = (section.columns || []).filter(
+                      (col) => col.col
+                    );
+
+                    return (
+                      <section
+                        className="report-view-popup-section"
+                        key={section.id || sectionIndex}
+                      >
+                        <h4>{section.title || `Section ${sectionIndex + 1}`}</h4>
+
+                        {section.type === "relatedTable" ? (
+
+<div className="report-view-related-table">
+  {(() => {
+    const data = relatedRows[section.id];
+    const relatedColumns = sectionColumns;
+
+    if (data?.loading || !data) {
+      return <p>Loading related records…</p>;
+    }
+
+    if (data.error) {
+      return <p role="alert">{data.error}</p>;
+    }
+
+    if (!data.rows.length) {
+      return <p>No related records found.</p>;
+    }
+
+    if (!relatedColumns.length) {
+      return <p>No columns configured for this related table.</p>;
+    }
+
+    const cellAlias = (name) => name.replace(/\./g, "__");
+
+    return (
+      <div className="rt-table-wrap">
+        <table className="rt">
+          <thead>
+            <tr>
+              {relatedColumns.map((col) => (
+                <th key={col.col}>{col.label || col.col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.rows.map((row, rowIndex) => (
+              <tr key={rowIndex}>
+                {relatedColumns.map((col) => (
+                  <td key={col.col}>
+                    {fmtCell(
+                      row[cellAlias(col.col)] ?? row[col.col],
+                      col.fmt || "auto",
+                      locale
+                    )}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  })()}
+</div>
+
+                        ) : (
+                          <div className="report-view-details">
+                            {sectionColumns.map((col) => {
+                              const value =
+                                selectedReportRecord[alias(col.col)] ??
+                                selectedReportRecord[col.col];
+
+                              return (
+                                <div
+                                  className="report-view-detail"
+                                  key={col.col}
+                                >
+                                  <span>{col.label || col.col}</span>
+                                  <strong>
+                                    {fmtCell(value, col.fmt || "auto", locale)}
+                                  </strong>
+                                </div>
+                              );
+                            })}
+
+                            {!sectionColumns.length && (
+                              <p>No fields configured for this section.</p>
+                            )}
+                          </div>
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="report-view-details">
+                  {(config.detailColumns?.length
+                    ? config.detailColumns
+                    : columns
+                  )
+                    .filter((col) => col.col)
+                    .map((col) => (
+                      <div className="report-view-detail" key={col.col}>
+                        <span>{col.label || col.col}</span>
+                        <strong>
+                          {fmtCell(
+                            selectedReportRecord[alias(col.col)] ??
+                              selectedReportRecord[col.col],
+                            col.fmt || "auto",
+                            locale
+                          )}
+                        </strong>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
+    );
+  }
   const slug = window.location.pathname.split("/r/")[1] || "";
   const [publicKey, publicToken] = slug.split("/");
 
@@ -1059,6 +1425,290 @@ function Panel({ box, cols }) {
                 options={widthOptions(cols)} onChange={(v) => set("span", v)} />
             </Field>
           </Row>
+
+          {box.kind === "reportView" && (() => {
+            const config = box.reportView || {};
+            const availableColumns = colOptions(state.catalog, box.src)
+              .map((col) => col.name)
+              .filter(Boolean);
+
+            const addColumn = (path, current) =>
+              set(path, [
+                ...(current || []),
+                {
+                  col: "",
+                  label: "",
+                  fmt: "auto",
+                },
+              ]);
+
+            const renderColumnEditor = (items, path) => (
+              <div className="collist">
+                {(items || []).map((col, i) => (
+                  <div className="colrow" key={`${path}-${i}`}>
+                    <Field label="Database column">
+                      <Select
+                        value={col.col || ""}
+                        options={[
+                          ["", "Select column"],
+                          ...availableColumns,
+                        ]}
+                        onChange={(v) => {
+                          set(`${path}.${i}.col`, v);
+                          if (v && !col.label) {
+                            set(`${path}.${i}.label`, v.split(".").pop());
+                          }
+                        }}
+                      />
+                    </Field>
+
+                    <Field label="Display heading">
+                      <Text
+                        value={col.label || ""}
+                        placeholder="Heading"
+                        onChange={(v) => set(`${path}.${i}.label`, v)}
+                      />
+                    </Field>
+
+                    <button
+                      type="button"
+                      className="xbtn"
+                      title="Remove column"
+                      onClick={() =>
+                        set(
+                          path,
+                          (items || []).filter((_, index) => index !== i)
+                        )
+                      }
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+
+            return (
+              <>
+                <Group>Report View — Display</Group>
+
+                <Switch
+                  on={config.search !== false}
+                  label="Enable search"
+                  onChange={(v) => set("reportView.search", v)}
+                />
+
+                <Switch
+                  on={config.pagination !== false}
+                  label="Enable pagination"
+                  onChange={(v) => set("reportView.pagination", v)}
+                />
+
+                <Row>
+                  <Field label="Rows per page">
+                    <Select
+                      value={config.pageSize || 10}
+                      numeric
+                      options={[5, 10, 15, 25, 50, 100]}
+                      onChange={(v) => set("reportView.pageSize", v)}
+                    />
+                  </Field>
+                </Row>
+
+                <Group>Visible Columns</Group>
+                {renderColumnEditor(config.columns, "reportView.columns")}
+
+                <button
+                  type="button"
+                  className="pb"
+                  onClick={() => addColumn("reportView.columns", config.columns)}
+                >
+                  + Add Report Column
+                </button>
+
+                <Group>Record Details Modal</Group>
+
+                <Field label="Column that opens the popup">
+                  <Select
+                    value={config.clickableColumn || ""}
+                    options={[
+                      ["", "Select clickable column"],
+                      ...availableColumns,
+                    ]}
+                    onChange={(v) => set("reportView.clickableColumn", v)}
+                  />
+                </Field>
+
+                <Field label="Modal title">
+                  <Text
+                    value={config.detailTitle || ""}
+                    placeholder="Record Details"
+                    onChange={(v) => set("reportView.detailTitle", v)}
+                  />
+                </Field>
+
+                <Hint>
+                  Leave detail columns empty to show the report columns in the
+                  modal. Otherwise, configure a separate set of detail fields.
+                </Hint>
+
+                {renderColumnEditor(
+                  config.detailColumns,
+                  "reportView.detailColumns"
+                )}
+
+                <button
+                  type="button"
+                  className="pb"
+                  onClick={() =>
+                    addColumn("reportView.detailColumns", config.detailColumns)
+                  }
+                >
+                  + Add Detail Field
+                </button>
+                <Group>Popup Sections</Group>
+
+<Hint>
+  Build the popup using multiple sections. Each section can display record
+  fields or a related table. Configure the relationship for related data.
+</Hint>
+
+{(config.popupSections || []).map((section, index) => (
+  <div
+    key={section.id || index}
+    style={{
+      border: "1px solid var(--border, #ddd)",
+      borderRadius: 8,
+      padding: 12,
+      marginBottom: 12,
+    }}
+  >
+    <Field label="Section title">
+      <Text
+        value={section.title || ""}
+        placeholder="Section title"
+        onChange={(v) =>
+          set(`reportView.popupSections.${index}.title`, v)
+        }
+      />
+    </Field>
+
+    <Field label="Section type">
+      <Select
+        value={section.type || "fields"}
+        options={[
+          ["fields", "Detail Fields"],
+          ["relatedTable", "Related Table"],
+        ]}
+        onChange={(v) =>
+          set(`reportView.popupSections.${index}.type`, v)
+        }
+      />
+    </Field>
+
+    {section.type === "relatedTable" && (
+      <>
+        <Field label="Related table">
+          <Select
+            value={section.table || ""}
+            options={[
+              ["", "Select related table"],
+              ...((state.catalog || []).map((t) =>
+                typeof t === "string"
+                  ? [t, t]
+                  : [t.name, t.name]
+              )),
+            ]}
+            onChange={(v) =>
+              set(`reportView.popupSections.${index}.table`, v)
+            }
+          />
+        </Field>
+
+        <Field label="Parent key column">
+          <Select
+            value={section.parentColumn || ""}
+            options={[
+              ["", "Select parent key"],
+              ...availableColumns,
+            ]}
+            onChange={(v) =>
+              set(`reportView.popupSections.${index}.parentColumn`, v)
+            }
+          />
+        </Field>
+
+        <Field label="Related table key column">
+          <Text
+            value={section.relatedColumn || ""}
+            placeholder="e.g. invoice_id"
+            onChange={(v) =>
+              set(`reportView.popupSections.${index}.relatedColumn`, v)
+            }
+          />
+        </Field>
+      </>
+    )}
+
+    {renderColumnEditor(
+      section.columns || [],
+      `reportView.popupSections.${index}.columns`
+    )}
+
+    <button
+      type="button"
+      className="pb"
+      onClick={() => {
+        const current = section.columns || [];
+        set(`reportView.popupSections.${index}.columns`, [
+          ...current,
+          { col: "", label: "", fmt: "auto" },
+        ]);
+      }}
+    >
+      + Add Column
+    </button>
+
+    <button
+      type="button"
+      className="xbtn"
+      onClick={() =>
+        set(
+          "reportView.popupSections",
+          config.popupSections.filter((_, i) => i !== index)
+        )
+      }
+    >
+      Remove Section
+    </button>
+  </div>
+))}
+
+<button
+  type="button"
+  className="pb"
+  onClick={() =>
+    set("reportView.popupSections", [
+      ...(config.popupSections || []),
+      {
+        id: `section-${Date.now()}`,
+        title: "New Section",
+        type: "fields",
+        columns: [],
+        table: "",
+        parentColumn: "",
+        relatedColumn: "",
+      },
+    ])
+  }
+>
+  + Add Box
+</button>
+                <Group>Data Source</Group>
+                <SourceEditor box={box} />
+              </>
+            );
+          })()}
 
           {box.kind === "value" && <ValueData box={box} set={set} />}
           {box.kind === "chart" && <ChartData box={box} set={set} />}

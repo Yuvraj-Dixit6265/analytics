@@ -44,87 +44,58 @@ def _quote(name):
         raise BadDefinition(f"not a usable identifier: {name!r}")
     return f"`{name}`"
 
+
 def vendor_condition(catalogue, table, column, value, via=None):
-    """Return (sql, params) that restricts `table` to one vendor.
-
-    Supported vendor relationships:
-      1. Direct: table.vendor_id = logged-in vendor_id
-      2. Explicit VENDOR_SCOPE_VIA relationship
-      3. BP mapping:
-         table.bp_no = vendor_master.bp_no
-         where vendor_master.vendor_id = logged-in vendor_id
-
-    The BP mapping is only used when the target table actually has
-    `bp_no`. Existing direct and VENDOR_SCOPE_VIA behavior remains unchanged.
-    """
+    """Return (SQL condition, parameters) restricting a table to one vendor."""
     cols = catalogue.get(table, set())
 
-    # 1. Direct vendor_id relationship.
+    # 1. Direct vendor column.
     if column in cols:
         return f"{_quote(table)}.{_quote(column)} = %s", [value]
 
-    # 2. Existing explicit relationship, e.g. ASN -> PO -> vendor_id.
+    # 2. Explicit configured relationship, e.g. ASN -> PO -> vendor_id.
     rule = (via or {}).get(table)
     if rule and ":" in rule and "." in rule.split(":", 1)[1]:
         local, target = rule.split(":", 1)
         ref, ref_col = target.split(".", 1)
         ref_cols = catalogue.get(ref, set())
 
-        if (
-            local in cols
-            and ref_col in ref_cols
-            and column in ref_cols
-        ):
+        if local in cols and ref_col in ref_cols and column in ref_cols:
             return (
                 f"EXISTS (SELECT 1 FROM {_quote(ref)} AS `_vs` "
-                f"WHERE `_vs`.{_quote(ref_col)} = {_quote(table)}.{_quote(local)} "
+                f"WHERE `_vs`.{_quote(ref_col)} = "
+                f"{_quote(table)}.{_quote(local)} "
                 f"AND `_vs`.{_quote(column)} = %s)"
             ), [value]
 
     # 3. Vendor Master BP mapping.
-    #
-    # Only activate this path for a table that actually exposes bp_no.
-    # vendor_master is used as the canonical vendor_id -> bp_no bridge.
     if "bp_no" in cols:
         vm_cols = catalogue.get("vendor_master", set())
         if {"vendor_id", "bp_no"}.issubset(vm_cols):
             return (
-                f"EXISTS ("
-                f"SELECT 1 FROM {_quote('vendor_master')} AS `_vm` "
-                f"WHERE `_vm`.{_quote('vendor_id')} = %s "
-                f"AND `_vm`.{_quote('bp_no')} = {_quote(table)}.{_quote('bp_no')}"
-                f")"
+                "EXISTS (SELECT 1 FROM `vendor_master` AS `_vm` "
+                "WHERE `_vm`.`vendor_id` = %s "
+                f"AND `_vm`.`bp_no` = {_quote(table)}.`bp_no`)"
             ), [value]
-        # 4. Supplier registration mapping through Vendor Master.
-    #
-    # supplier_registration does not carry vendor_id/bp_no itself.
-    # vendor_master.supplier_registration_id identifies the registration
-    # belonging to the logged-in vendor.
+
+    # 4. Supplier registration mapping through Vendor Master.
     if table == "supplier_registration":
         vm_cols = catalogue.get("vendor_master", set())
         sr_cols = catalogue.get("supplier_registration", set())
 
-        if {
-            "vendor_id",
-            "supplier_registration_id",
-        }.issubset(vm_cols) and "id" in sr_cols:
+        if (
+            {"vendor_id", "supplier_registration_id"}.issubset(vm_cols)
+            and "id" in sr_cols
+        ):
             return (
-                f"EXISTS ("
-                f"SELECT 1 FROM {_quote('vendor_master')} AS `_vm` "
-                f"WHERE `_vm`.{_quote('vendor_id')} = %s "
-                f"AND `_vm`.{_quote('supplier_registration_id')} = "
-                f"{_quote(table)}.{_quote('id')}"
-                f")"
+                "EXISTS (SELECT 1 FROM `vendor_master` AS `_vm` "
+                "WHERE `_vm`.`vendor_id` = %s "
+                f"AND `_vm`.`supplier_registration_id` = "
+                f"{_quote(table)}.`id`)"
             ), [value]
+
     return None
-    local, target = rule.split(":", 1)
-    ref, ref_col = target.split(".", 1)
-    ref_cols = catalogue.get(ref, set())
-    if local not in cols or ref_col not in ref_cols or column not in ref_cols:
-        return None
-    return (f"EXISTS (SELECT 1 FROM {_quote(ref)} AS `_vs` "
-            f"WHERE `_vs`.{_quote(ref_col)} = {_quote(table)}.{_quote(local)} "
-            f"AND `_vs`.{_quote(column)} = %s)"), [value]
+
 
 
 class Scope:
@@ -481,16 +452,42 @@ def build(box, filters, state, catalogue, role_row=None, force=None):
         if int(cfg.get("limit") or 0) > 0:
             limit = int(cfg["limit"])
 
-    elif kind == "table":
-        cfg = box.get("table") or {}
+
+    elif kind in ("table", "reportView"):
+        if kind == "table":
+            cfg = box.get("table") or {}
+        else:
+            report_view = box.get("reportView") or {}
+            cfg = {
+                "columns": [
+                    {"col": c.get("col"), "on": True}
+                    for c in report_view.get("columns", [])
+                    if isinstance(c, dict) and c.get("col")
+                ],
+                "limit": report_view.get("limit", 100),
+                "sort": report_view.get("sort", ""),
+                "dir": report_view.get("dir", "asc"),
+            }
+
         cols = [c for c in (cfg.get("columns") or []) if c.get("on")]
         if not cols:
             return None, None
-        select = [f"{scope.col(c['col'])} AS {_quote(_alias(c['col']))}" for c in cols]
+
+        select = [
+            f"{scope.col(c['col'])} AS {_quote(_alias(c['col']))}"
+            for c in cols
+        ]
+
         if cfg.get("sort") and scope.has(cfg["sort"]):
-            direction = "DESC" if (cfg.get("dir") or "asc").lower() == "desc" else "ASC"
+            direction = (
+                "DESC"
+                if (cfg.get("dir") or "asc").lower() == "desc"
+                else "ASC"
+            )
             order = f"{scope.col(cfg['sort'])} {direction}"
+
         limit = max(1, int(cfg.get("limit") or 10))
+
     else:
         raise BadDefinition(f"unknown box kind: {kind!r}")
 

@@ -1676,6 +1676,249 @@ def get_public_pr_items(key, token, pr_number):
         return jsonify(
             error=f"could not load PR items: {str(exc)[:300]}"
         ), 502
+
+
+def _report_view_related_rows_for_definition(
+    definition, conn_row, body, force=None
+):
+    """Load configured related rows only for a verified report parent."""
+    import re
+    from querybuilder import _quote
+
+    box_id = str(body.get("boxId") or "")
+    section_id = str(body.get("sectionId") or "")
+    record = body.get("record")
+    filters_state = body.get("filters") or {}
+
+    try:
+        limit = int(body.get("limit") or 20)
+    except (TypeError, ValueError):
+        raise ValueError("invalid limit")
+
+    limit = max(1, min(limit, 100))
+
+    if (
+        not box_id
+        or not section_id
+        or not isinstance(record, dict)
+        or not isinstance(filters_state, dict)
+    ):
+        raise ValueError("invalid report-view request")
+
+    box = next(
+        (
+            b
+            for sec in definition.get("sections", [])
+            for b in sec.get("boxes", [])
+            if str(b.get("id") or "") == box_id
+        ),
+        None,
+    )
+    if not box or box.get("kind") != "reportView":
+        raise PermissionError("report view not available")
+
+    popup = (box.get("reportView") or {}).get("popupSections") or []
+    section = next(
+        (s for s in popup if str(s.get("id") or "") == section_id),
+        None,
+    )
+    if not section or section.get("type") != "relatedTable":
+        raise PermissionError("related section not available")
+
+    parent_table = str((box.get("src") or {}).get("base") or "")
+    detail_table = str(section.get("table") or "")
+    parent_column = str(section.get("parentColumn") or "")
+    detail_column = str(section.get("relatedColumn") or "")
+    columns = [
+        str(c.get("col") or "")
+        for c in section.get("columns") or []
+        if isinstance(c, dict) and c.get("col")
+    ]
+
+    if not all((
+        parent_table, detail_table, parent_column, detail_column, columns
+    )):
+        raise ValueError("related section is incomplete")
+
+    tables = db.introspect(conn_row)
+    catalogue = db.catalogue_index(tables)
+    relationships = db.relationships(conn_row, tables)
+
+    if parent_table not in catalogue or detail_table not in catalogue:
+        raise BadDefinition("invalid configured table")
+    if parent_column not in catalogue[parent_table]:
+        raise BadDefinition("invalid parent column")
+    if detail_column not in catalogue[detail_table]:
+        raise BadDefinition("invalid related-table column")
+    if any(c not in catalogue[detail_table] for c in columns):
+        raise BadDefinition("invalid related-table field")
+
+
+    valid_relationship = any(
+        r["from_table"] == detail_table
+        and r["from_column"] == detail_column
+        and r["to_table"] == parent_table
+        and r["to_column"] == parent_column
+        and bool(r.get("to_unique"))
+        for r in relationships
+    )
+    if not valid_relationship:
+        raise BadDefinition(
+            "the parent column must be a unique referenced key "
+            "in the configured relationship"
+        )
+
+
+    parent_alias = parent_column.replace(".", "__")
+
+    parent_value = record.get(parent_column)
+    if parent_value is None:
+        parent_value = record.get(parent_alias)
+    if parent_value is None:
+        parent_value = record.get(f"{parent_table}__{parent_column}")
+    if parent_value is None:
+        raise ValueError("selected record has no parent key")
+
+    # Verify the parent against the saved report query and its active filters.
+    # The browser-supplied record is used only to identify the candidate value.
+    verify_box = dict(box)
+    verify_box["kind"] = "table"
+    verify_box["table"] = {
+        "columns": [{"col": parent_column, "on": True}],
+        "limit": 1,
+    }
+
+    verify_sql, verify_params = build(
+        verify_box,
+        definition.get("filters"),
+        filters_state,
+        catalogue,
+        force=force,
+    )
+    if not verify_sql:
+        raise BadDefinition("cannot verify the selected report record")
+
+    # Remove the synthetic table's LIMIT so the outer predicate can locate
+    # the candidate even when it is not the first row.
+    verify_sql = re.sub(
+        r"\s+LIMIT\s+\d+\s*$", "", verify_sql, flags=re.IGNORECASE
+    )
+    verify_sql = (
+        "SELECT 1 FROM (" + verify_sql + ") AS `_rv_parent_check` "
+        "WHERE `_rv_parent_check`." + _quote(parent_alias) + " = %s "
+        "LIMIT 1"
+    )
+    verified = db.run_report_query(
+        conn_row, verify_sql, tuple(verify_params) + (parent_value,)
+    )
+    if not verified:
+        raise PermissionError("selected record is not in the authorized report")
+
+    # Independently scope the related table for vendor publications.
+    where = [
+        f"{_quote(detail_table)}.{_quote(detail_column)} = %s"
+    ]
+    params = [parent_value]
+
+    if force:
+        condition = vendor_condition(
+            catalogue,
+            detail_table,
+            force["column"],
+            force["value"],
+            force.get("via"),
+        )
+        if not condition:
+            raise PermissionError(
+                "related table cannot be restricted to this vendor"
+            )
+        where.append(condition[0])
+        params.extend(condition[1])
+
+    select_parts = [
+        f"{_quote(detail_table)}.{_quote(col)} AS {_quote(col)}"
+        for col in columns
+    ]
+    sql = (
+        f"SELECT {', '.join(select_parts)} "
+        f"FROM {_quote(detail_table)} "
+        f"WHERE {' AND '.join(where)} LIMIT %s"
+    )
+    params.append(limit)
+
+    return db.run_report_query(conn_row, sql, tuple(params))
+
+
+@app.post("/api/processes/<key>/report-view-related")
+@auth()
+def report_view_related_rows(key):
+    body = request.get_json(silent=True) or {}
+    process = db.q1(
+        "SELECT * FROM processes WHERE process_key=%s", (key,)
+    )
+    if not process:
+        return jsonify(error="report not found"), 404
+
+    definition = process["definition"]
+    if not isinstance(definition, dict):
+        definition = json.loads(definition)
+
+    conn_row = _connection_for(process)
+    if not conn_row:
+        return jsonify(error="no data connection configured"), 400
+
+    try:
+        rows = _report_view_related_rows_for_definition(
+            definition, conn_row, body
+        )
+        return jsonify(rows=rows)
+    except PermissionError as exc:
+        return jsonify(error=str(exc)), 403
+    except (ValueError, BadDefinition) as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        app.logger.exception("Report View related rows failed")
+        return jsonify(error="could not load related rows"), 502
+
+
+@app.post("/api/r/<key>/<token>/report-view-related")
+def public_report_view_related_rows(key, token):
+    pub = _resolve_pub(key, token)
+    if not pub:
+        return jsonify(error="this link is not live"), 404
+
+    body = request.get_json(silent=True) or {}
+    version = db.q1(
+        "SELECT definition FROM process_versions "
+        "WHERE process_id=%s AND version=%s",
+        (pub["process_id"], pub["pinned_version"]),
+    )
+    if not version:
+        return jsonify(error="published report version not found"), 404
+
+    definition = version["definition"]
+    if not isinstance(definition, dict):
+        definition = json.loads(definition)
+    definition = _definition_for_role(definition, pub["role"])
+
+    conn_row = _connection_for(cid=pub["connection_id"])
+    if not conn_row:
+        return jsonify(error="no data connection configured"), 400
+
+    try:
+        rows = _report_view_related_rows_for_definition(
+            definition, conn_row, body, force=_vendor_force(pub)
+        )
+        return jsonify(rows=rows)
+    except PermissionError as exc:
+        return jsonify(error=str(exc)), 403
+    except (ValueError, BadDefinition) as exc:
+        return jsonify(error=str(exc)), 400
+    except Exception:
+        app.logger.exception("Published Report View related rows failed")
+        return jsonify(error="could not load related rows"), 502
+
+
 @app.get("/api/r/<key>/<token>/detail")
 def get_public_detail_rows(key, token):
     value = request.args.get("value", "")

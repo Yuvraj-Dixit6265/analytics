@@ -46,6 +46,7 @@ export const BOX_KINDS = [
   ["value", "Value"],
   ["chart", "Graph"],
   ["table", "Table"],
+  ["reportView", "Report View"],
   ["manualTable", "Manual Table"],
   ["note", "Note"],
   ["form", "Form"],
@@ -200,6 +201,23 @@ if (b.table?.detail?.columns) {
   zebra: true,
   headStyle: S(),
 };
+  if (!b.reportView) b.reportView = {};
+
+  b.reportView = {
+    search: true,
+    pagination: true,
+    pageSize: 10,
+    clickableColumn: "",
+    detailTitle: "Record Details",
+    columns: [],
+    detailColumns: [],
+    popupSections: [],
+    ...b.reportView,
+  };
+
+  if (!Array.isArray(b.reportView.popupSections)) {
+    b.reportView.popupSections = [];
+  }
   if (!b.note) b.note = { html: "" };
   return b;
 }

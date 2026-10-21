@@ -465,17 +465,9 @@ React.useEffect(() => {
                 </button>
               </div>
 
-              {(config.popupSections || []).some(
-                (section) =>
-                  !(section.type === "dataTable" && section.mode === "standalone")
-              ) ? (
+              {(config.popupSections || []).length > 0 ? (
                 <div className="report-view-popup-sections">
-                  {config.popupSections
-                    .filter(
-                      (section) =>
-                        !(section.type === "dataTable" && section.mode === "standalone")
-                    )
-                    .map((section, sectionIndex) => {
+                  {config.popupSections.map((section, sectionIndex) => {
                     const sectionColumns = (section.columns || []).filter(
                       (col) => col.col
                     );

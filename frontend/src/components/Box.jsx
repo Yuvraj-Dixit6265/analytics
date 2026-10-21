@@ -166,7 +166,8 @@ React.useEffect(() => {
   if (!selectedReportRecord || box.kind !== "reportView") return;
 
   const sections = (box.reportView?.popupSections || []).filter(
-    (section) => section.type === "relatedTable"
+    (section) =>
+      section.type === "relatedTable" || section.type === "dataTable"
   );
 
   if (!sections.length) return;
@@ -455,7 +456,8 @@ React.useEffect(() => {
                               );
                             })()}
                           </div>
-                        ) : section.type === "relatedTable" ? (
+                        ) : section.type === "relatedTable" ||
+                          section.type === "dataTable" ? (
 
 <div className="report-view-related-table">
   {(() => {
@@ -1645,7 +1647,8 @@ function Panel({ box, cols }) {
         options={[
           ["fields", "Detail Fields"],
           ["manualTable", "Manual Table"],
-          ["relatedTable", "Related Table"],
+          ["dataTable", "Data Table"],
+          ["relatedTable", "Related Table (Legacy)"],
         ]}
         onChange={(v) =>
           set(`reportView.popupSections.${index}.type`, v)
@@ -1718,7 +1721,89 @@ function Panel({ box, cols }) {
       </>
     )}
 
-    {renderColumnEditor(
+    {section.type === "dataTable" && (
+      <div style={{ marginTop: 10 }}>
+        <Field label="Displayed database columns">
+          <Hint>
+            Choose fields from the selected table. The relationship to the
+            report record is detected from database metadata.
+          </Hint>
+        </Field>
+
+        {(() => {
+          const tableEntry = (state.catalog?.tables || []).find(
+            (t) =>
+              (typeof t === "string" ? t : t.name) === section.table
+          );
+          const tableColumns = (tableEntry?.columns || []).map((c) =>
+            typeof c === "string" ? c : c.name
+          ).filter(Boolean);
+
+          return (section.columns || []).map((column, columnIndex) => (
+            <div
+              key={`${column.col || "column"}-${columnIndex}`}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto",
+                gap: 8,
+                marginBottom: 8,
+              }}
+            >
+              <Select
+                value={column.col || ""}
+                options={[
+                  ["", "Select column"],
+                  ...tableColumns.map((name) => [name, name]),
+                ]}
+                onChange={(v) =>
+                  set(
+                    `reportView.popupSections.${index}.columns.${columnIndex}.col`,
+                    v
+                  )
+                }
+              />
+              <Text
+                value={column.label || ""}
+                placeholder="Display label"
+                onChange={(v) =>
+                  set(
+                    `reportView.popupSections.${index}.columns.${columnIndex}.label`,
+                    v
+                  )
+                }
+              />
+              <button
+                type="button"
+                className="xbtn"
+                onClick={() =>
+                  set(
+                    `reportView.popupSections.${index}.columns`,
+                    (section.columns || []).filter((_, i) => i !== columnIndex)
+                  )
+                }
+              >
+                Remove
+              </button>
+            </div>
+          ));
+        })()}
+
+        <button
+          type="button"
+          className="pb"
+          onClick={() =>
+            set(`reportView.popupSections.${index}.columns`, [
+              ...(section.columns || []),
+              { col: "", label: "", fmt: "auto" },
+            ])
+          }
+        >
+          + Add Database Column
+        </button>
+      </div>
+    )}
+
+    {section.type !== "dataTable" && renderColumnEditor(
       section.columns || [],
       `reportView.popupSections.${index}.columns`
     )}

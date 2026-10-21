@@ -1722,22 +1722,19 @@ def _report_view_related_rows_for_definition(
         (s for s in popup if str(s.get("id") or "") == section_id),
         None,
     )
-    if not section or section.get("type") != "relatedTable":
+    if not section or section.get("type") not in ("relatedTable", "dataTable"):
         raise PermissionError("related section not available")
 
+    section_type = section.get("type")
     parent_table = str((box.get("src") or {}).get("base") or "")
     detail_table = str(section.get("table") or "")
-    parent_column = str(section.get("parentColumn") or "")
-    detail_column = str(section.get("relatedColumn") or "")
     columns = [
         str(c.get("col") or "")
         for c in section.get("columns") or []
         if isinstance(c, dict) and c.get("col")
     ]
 
-    if not all((
-        parent_table, detail_table, parent_column, detail_column, columns
-    )):
+    if not parent_table or not detail_table or not columns:
         raise ValueError("related section is incomplete")
 
     tables = db.introspect(conn_row)
@@ -1746,28 +1743,50 @@ def _report_view_related_rows_for_definition(
 
     if parent_table not in catalogue or detail_table not in catalogue:
         raise BadDefinition("invalid configured table")
-    if parent_column not in catalogue[parent_table]:
-        raise BadDefinition("invalid parent column")
-    if detail_column not in catalogue[detail_table]:
-        raise BadDefinition("invalid related-table column")
     if any(c not in catalogue[detail_table] for c in columns):
         raise BadDefinition("invalid related-table field")
 
+    if section_type == "dataTable":
+        # Infer the relationship from database metadata. Only accept one
+        # unambiguous child-to-parent relationship to a unique parent key.
+        candidates = [
+            r for r in relationships
+            if r["from_table"] == detail_table
+            and r["to_table"] == parent_table
+            and bool(r.get("to_unique"))
+        ]
+        if len(candidates) != 1:
+            raise BadDefinition(
+                "could not infer one unambiguous relationship between "
+                "the selected table and report table; use Related Table "
+                "(Legacy) to configure the keys explicitly"
+            )
+        relationship = candidates[0]
+        detail_column = str(relationship["from_column"])
+        parent_column = str(relationship["to_column"])
+    else:
+        parent_column = str(section.get("parentColumn") or "")
+        detail_column = str(section.get("relatedColumn") or "")
+        if not parent_column or not detail_column:
+            raise ValueError("related section is incomplete")
+        if parent_column not in catalogue[parent_table]:
+            raise BadDefinition("invalid parent column")
+        if detail_column not in catalogue[detail_table]:
+            raise BadDefinition("invalid related-table column")
 
-    valid_relationship = any(
-        r["from_table"] == detail_table
-        and r["from_column"] == detail_column
-        and r["to_table"] == parent_table
-        and r["to_column"] == parent_column
-        and bool(r.get("to_unique"))
-        for r in relationships
-    )
-    if not valid_relationship:
-        raise BadDefinition(
-            "the parent column must be a unique referenced key "
-            "in the configured relationship"
+        valid_relationship = any(
+            r["from_table"] == detail_table
+            and r["from_column"] == detail_column
+            and r["to_table"] == parent_table
+            and r["to_column"] == parent_column
+            and bool(r.get("to_unique"))
+            for r in relationships
         )
-
+        if not valid_relationship:
+            raise BadDefinition(
+                "the parent column must be a unique referenced key "
+                "in the configured relationship"
+            )
 
     parent_alias = parent_column.replace(".", "__")
 

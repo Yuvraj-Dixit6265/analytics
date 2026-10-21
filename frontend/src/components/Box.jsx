@@ -1723,6 +1723,25 @@ function Panel({ box, cols }) {
 
     {section.type === "dataTable" && (
       <div style={{ marginTop: 10 }}>
+        <Field label="Choose database table">
+          <Select
+            value={section.table || ""}
+            options={[
+              ["", "Select database table"],
+              ...(state.catalog?.tables || [])
+                .map((t) => {
+                  const name = typeof t === "string" ? t : t.name;
+                  return name ? [name, name] : null;
+                })
+                .filter(Boolean),
+            ]}
+            onChange={(v) => {
+              set(`reportView.popupSections.${index}.table`, v);
+              set(`reportView.popupSections.${index}.columns`, []);
+            }}
+          />
+        </Field>
+
         <Field label="Displayed database columns">
           <Hint>
             Choose fields from the selected table. The relationship to the

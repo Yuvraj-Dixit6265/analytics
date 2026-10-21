@@ -497,3 +497,207 @@ table.rt {
   border-collapse: collapse;
   font-size: 12.5px;
 }
+
+/* ---------- report record detail popup ---------- */
+.report-view-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(3px);
+  overflow-y: auto;
+}
+
+.report-view-modal {
+  width: min(900px, 100%);
+  max-height: min(85vh, 900px);
+  overflow-y: auto;
+  background: var(--panel, #fff);
+  color: var(--text, #111827);
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 10px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  padding: 24px;
+}
+
+.report-view-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--line, #e5e7eb);
+}
+
+.report-view-modal-header h3 {
+  font-size: 20px;
+  line-height: 1.4;
+  color: var(--ink, #0f172a);
+  overflow-wrap: anywhere;
+}
+
+.report-view-modal-header .xbtn {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--muted, #6b7280);
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.report-view-modal-header .xbtn:hover {
+  background: var(--oxide-soft, #eef0fb);
+  border-color: var(--oxide, #293383);
+  color: var(--oxide, #293383);
+}
+
+.report-view-popup-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.report-view-popup-section {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.report-view-popup-section h4 {
+  margin-bottom: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink, #0f172a);
+}
+
+.report-view-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.report-view-detail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-soft, #f3f4f6);
+  border-radius: 6px;
+  background: #f9fafb;
+}
+
+.report-view-detail > span {
+  color: var(--muted, #6b7280);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.report-view-detail > strong {
+  color: var(--text, #111827);
+  font-size: 13px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.report-view-related-table {
+  min-width: 0;
+}
+
+.report-view-related-table > p {
+  margin: 8px 0;
+  color: var(--muted, #6b7280);
+  font-size: 13px;
+}
+
+.report-view-related-table .rt-table-wrap {
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 6px;
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 360px;
+}
+
+.report-view-related-table table.rt {
+  width: 100%;
+  min-width: 480px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.report-view-related-table table.rt th,
+.report-view-related-table table.rt td {
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line-soft, #f3f4f6);
+  overflow-wrap: anywhere;
+}
+
+.report-view-related-table table.rt th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--oxide-soft, #eef0fb);
+  color: var(--ink, #0f172a);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.report-view-related-table table.rt tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.report-view-related-table table.rt tbody tr:hover {
+  background: #f9fafb;
+}
+
+@media (max-width: 640px) {
+  .report-view-overlay {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .report-view-modal {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+    padding: 16px;
+    border-radius: 8px;
+  }
+
+  .report-view-modal-header h3 {
+    font-size: 17px;
+  }
+
+  .report-view-popup-section {
+    padding: 12px;
+  }
+
+  .report-view-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .report-view-related-table .rt-table-wrap {
+    max-height: 280px;
+  }
+}

@@ -148,6 +148,40 @@ const Placeholder = ({ msg, sub, height }) => (
   </div>
 );
 
+/* ---- popup section helpers ---- */
+const newPopupManualTable = () => {
+  const stamp = uid("col");
+  return {
+    columns: [
+      { id: `${stamp}_1`, label: "Item" },
+      { id: `${stamp}_2`, label: "Quantity" },
+      { id: `${stamp}_3`, label: "Amount" },
+    ],
+    rows: [{ id: `${uid("row")}_1`, cells: ["", "", ""] }],
+    zebra: true,
+  };
+};
+
+const newPopupSection = (type = "fields") => ({
+  id: uid("section"),
+  title: type === "manualTable" ? "Line Items" : "New Section",
+  type,
+  columns: [],
+  manualTable: newPopupManualTable(),
+  table: "",
+  mode: "related",
+  columnSource: "table",
+  parentColumn: "",
+  relatedColumn: "",
+});
+
+const cellAlign = (col) =>
+  col?.align === "right"
+    ? { className: "num" }
+    : col?.align === "center"
+    ? { style: { textAlign: "center" } }
+    : {};
+
 function Body({ box }) {
   const { state, dispatch } = useStore();
   const publicPath = window.location.pathname.match(/^\/(?:analytics\/)?r\/([^/]+)\/([^/]+)/);
@@ -269,6 +303,18 @@ React.useEffect(() => {
       .filter((col) => col.col);
 
     const alias = (name) => name.replace(/\./g, "__");
+
+    const design = state.mode === "design";
+    const popupSections = config.popupSections || [];
+    const setBox = (path, value) =>
+      dispatch({ type: "set", target: "box", id: box.id, path, value });
+    const addPopupSection = (type) =>
+      setBox("reportView.popupSections", [...popupSections, newPopupSection(type)]);
+    const removePopupSection = (index) =>
+      setBox(
+        "reportView.popupSections",
+        popupSections.filter((_, i) => i !== index)
+      );
 
     const filteredRows = rows.filter((row) => {
       if (!config.search || !reportSearchTerm.trim()) return true;
@@ -420,15 +466,18 @@ React.useEffect(() => {
                       <thead>
                         <tr>
                           {standaloneColumns.map((col) => (
-                            <th key={col.col}>{col.label || col.col}</th>
+                            <th key={col.col} {...cellAlign(col)}>{col.label || col.col}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {data.rows.map((row, rowIndex) => (
-                          <tr key={rowIndex}>
+                        {data.rows.slice(0, section.limit || 100).map((row, rowIndex) => (
+                          <tr
+                            key={rowIndex}
+                            className={section.zebra && rowIndex % 2 ? "z" : undefined}
+                          >
                             {standaloneColumns.map((col) => (
-                              <td key={col.col}>
+                              <td key={col.col} {...cellAlign(col)}>
                                 {fmtCell(
                                   row[cellAlias(col.key || col.col)] ?? row[col.key || col.col],
                                   col.fmt || "auto",
@@ -477,7 +526,39 @@ React.useEffect(() => {
                         className="report-view-popup-section"
                         key={section.id || sectionIndex}
                       >
-                        <h4>{section.title || `Section ${sectionIndex + 1}`}</h4>
+                        {design ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: 8,
+                            }}
+                          >
+                            <Editable
+                              className="box-title"
+                              style={{ fontWeight: 600, flex: 1 }}
+                              value={section.title}
+                              placeholder={`Section ${sectionIndex + 1}`}
+                              onChange={(v) =>
+                                setBox(
+                                  `reportView.popupSections.${sectionIndex}.title`,
+                                  v
+                                )
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="xbtn"
+                              title="Remove this box"
+                              onClick={() => removePopupSection(sectionIndex)}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ) : (
+                          <h4>{section.title || `Section ${sectionIndex + 1}`}</h4>
+                        )}
 
                         {section.type === "manualTable" ? (
                           <div className="report-view-related-table">
@@ -485,42 +566,169 @@ React.useEffect(() => {
                               const table = section.manualTable || {};
                               const tableColumns = table.columns || [];
                               const tableRows = table.rows || [];
+                              const base = `reportView.popupSections.${sectionIndex}.manualTable`;
 
-                              if (!tableColumns.length) {
+                              const writeTable = (next) =>
+                                setBox(base, {
+                                  zebra: true,
+                                  ...table,
+                                  columns: tableColumns,
+                                  rows: tableRows,
+                                  ...next,
+                                });
+
+                              const addRow = () =>
+                                writeTable({
+                                  rows: [
+                                    ...tableRows,
+                                    {
+                                      id: uid("row"),
+                                      cells: tableColumns.map(() => ""),
+                                    },
+                                  ],
+                                });
+
+                              const addColumn = () =>
+                                writeTable({
+                                  columns: [
+                                    ...tableColumns,
+                                    {
+                                      id: uid("col"),
+                                      label: `Column ${tableColumns.length + 1}`,
+                                    },
+                                  ],
+                                  rows: tableRows.map((row) => ({
+                                    ...row,
+                                    cells: [...(row.cells || []), ""],
+                                  })),
+                                });
+
+                              const removeColumn = (index) =>
+                                writeTable({
+                                  columns: tableColumns.filter((_, i) => i !== index),
+                                  rows: tableRows.map((row) => ({
+                                    ...row,
+                                    cells: (row.cells || []).filter((_, i) => i !== index),
+                                  })),
+                                });
+
+                              const removeRow = (index) =>
+                                writeTable({
+                                  rows: tableRows.filter((_, i) => i !== index),
+                                });
+
+                              const setLabel = (index, value) =>
+                                writeTable({
+                                  columns: tableColumns.map((col, i) =>
+                                    i === index ? { ...col, label: value } : col
+                                  ),
+                                });
+
+                              const setCell = (rowIndex, colIndex, value) =>
+                                writeTable({
+                                  rows: tableRows.map((row, r) =>
+                                    r !== rowIndex
+                                      ? row
+                                      : {
+                                          ...row,
+                                          cells: tableColumns.map((_, c) =>
+                                            c === colIndex
+                                              ? value
+                                              : row.cells?.[c] ?? ""
+                                          ),
+                                        }
+                                  ),
+                                });
+
+                              if (!tableColumns.length && !design) {
                                 return <p>No columns configured for this table.</p>;
                               }
 
                               return (
-                                <div className="rt-table-wrap">
-                                  <table className="rt manual-table">
-                                    <thead>
-                                      <tr>
-                                        {tableColumns.map((col, i) => (
-                                          <th key={col.id || i}>
-                                            {col.label || `Column ${i + 1}`}
-                                          </th>
-                                        ))}
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {tableRows.map((row, rowIndex) => (
-                                        <tr
-                                          key={row.id || rowIndex}
-                                          className={
-                                            table.zebra && rowIndex % 2
-                                              ? "z"
-                                              : undefined
-                                          }
-                                        >
-                                          {tableColumns.map((col, colIndex) => (
-                                            <td key={col.id || colIndex}>
-                                              {row.cells?.[colIndex] ?? ""}
-                                            </td>
+                                <div className="manual-table-wrap">
+                                  <div className="rt-table-wrap">
+                                    <table className="rt manual-table">
+                                      <thead>
+                                        <tr>
+                                          {tableColumns.map((col, i) => (
+                                            <th key={col.id || i}>
+                                              <div
+                                                style={{
+                                                  display: "flex",
+                                                  alignItems: "center",
+                                                  gap: 4,
+                                                }}
+                                              >
+                                                <Editable
+                                                  value={col.label}
+                                                  placeholder={`Column ${i + 1}`}
+                                                  editable={design}
+                                                  onChange={(v) => setLabel(i, v)}
+                                                />
+                                                {design && tableColumns.length > 1 && (
+                                                  <button
+                                                    type="button"
+                                                    className="xbtn"
+                                                    title="Remove column"
+                                                    onClick={() => removeColumn(i)}
+                                                  >
+                                                    ×
+                                                  </button>
+                                                )}
+                                              </div>
+                                            </th>
                                           ))}
+                                          {design && <th style={{ width: 28 }} />}
                                         </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
+                                      </thead>
+                                      <tbody>
+                                        {tableRows.map((row, rowIndex) => (
+                                          <tr
+                                            key={row.id || rowIndex}
+                                            className={
+                                              table.zebra && rowIndex % 2 ? "z" : undefined
+                                            }
+                                          >
+                                            {tableColumns.map((col, colIndex) => (
+                                              <td key={col.id || colIndex}>
+                                                <Editable
+                                                  value={row.cells?.[colIndex] ?? ""}
+                                                  placeholder=""
+                                                  editable={design}
+                                                  onChange={(v) =>
+                                                    setCell(rowIndex, colIndex, v)
+                                                  }
+                                                />
+                                              </td>
+                                            ))}
+                                            {design && (
+                                              <td>
+                                                <button
+                                                  type="button"
+                                                  className="xbtn"
+                                                  title="Remove row"
+                                                  onClick={() => removeRow(rowIndex)}
+                                                >
+                                                  ×
+                                                </button>
+                                              </td>
+                                            )}
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+
+                                  {design && (
+                                    <div className="manual-table-actions">
+                                      <button type="button" className="pb" onClick={addRow}>
+                                        + Add Row
+                                      </button>
+                                      <button type="button" className="pb" onClick={addColumn}>
+                                        + Add Column
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })()}
@@ -557,15 +765,18 @@ React.useEffect(() => {
           <thead>
             <tr>
               {relatedColumns.map((col) => (
-                <th key={col.col}>{col.label || col.col}</th>
+                <th key={col.col} {...cellAlign(col)}>{col.label || col.col}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {data.rows.map((row, rowIndex) => (
-              <tr key={rowIndex}>
+            {data.rows.slice(0, section.limit || 100).map((row, rowIndex) => (
+              <tr
+                key={rowIndex}
+                className={section.zebra && rowIndex % 2 ? "z" : undefined}
+              >
                 {relatedColumns.map((col) => (
-                  <td key={col.col}>
+                  <td key={col.col} {...cellAlign(col)}>
                     {fmtCell(
                       row[cellAlias(col.key || col.col)] ?? row[col.key || col.col],
                       col.fmt || "auto",
@@ -631,6 +842,25 @@ React.useEffect(() => {
                         </strong>
                       </div>
                     ))}
+                </div>
+              )}
+
+              {design && (
+                <div className="manual-table-actions" style={{ marginTop: 12 }}>
+                  <button
+                    type="button"
+                    className="pb"
+                    onClick={() => addPopupSection("manualTable")}
+                  >
+                    + Add Box
+                  </button>
+                  <button
+                    type="button"
+                    className="pb"
+                    onClick={() => addPopupSection("fields")}
+                  >
+                    + Add Fields
+                  </button>
                 </div>
               )}
             </div>
@@ -1560,14 +1790,56 @@ function Panel({ box, cols }) {
                 },
               ]);
 
+            const moveItem = (items, path, index, d) => {
+              const next = [...(items || [])];
+              const target = index + d;
+              if (target < 0 || target >= next.length) return;
+              [next[index], next[target]] = [next[target], next[index]];
+              set(path, next);
+            };
+
+            const changePopupType = (index, section, v) => {
+              set(`reportView.popupSections.${index}.type`, v);
+              if (v === "manualTable" && !section.manualTable?.columns?.length) {
+                set(
+                  `reportView.popupSections.${index}.manualTable`,
+                  newPopupManualTable()
+                );
+              }
+            };
+
             const renderColumnEditor = (
               items,
               path,
-              columnOptions = availableColumns
+              columnOptions = availableColumns,
+              opts = {}
             ) => (
               <div className="collist">
                 {(items || []).map((col, i) => (
                   <div className="colrow" key={`${path}-${i}`}>
+                    {opts.move && (
+                      <span className="colmv">
+                        <button
+                          type="button"
+                          className="xbtn"
+                          title="Move up"
+                          disabled={i === 0}
+                          onClick={() => moveItem(items, path, i, -1)}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          className="xbtn"
+                          title="Move down"
+                          disabled={i === (items || []).length - 1}
+                          onClick={() => moveItem(items, path, i, 1)}
+                        >
+                          ↓
+                        </button>
+                      </span>
+                    )}
+
                     <Field label="Database column">
                       <Select
                         value={col.col || ""}
@@ -1591,6 +1863,30 @@ function Panel({ box, cols }) {
                         onChange={(v) => set(`${path}.${i}.label`, v)}
                       />
                     </Field>
+
+                    {opts.fmt && (
+                      <Field label="Format">
+                        <Select
+                          value={col.fmt || "auto"}
+                          options={FMTS}
+                          onChange={(v) => set(`${path}.${i}.fmt`, v)}
+                        />
+                      </Field>
+                    )}
+
+                    {opts.align && (
+                      <Field label="Align">
+                        <Select
+                          value={col.align || "left"}
+                          options={[
+                            ["left", "Left"],
+                            ["center", "Centre"],
+                            ["right", "Right"],
+                          ]}
+                          onChange={(v) => set(`${path}.${i}.align`, v)}
+                        />
+                      </Field>
+                    )}
 
                     <button
                       type="button"
@@ -1715,20 +2011,19 @@ function Panel({ box, cols }) {
       />
     </Field>
 
-    <Field label="Section type">
-      <Select
-        value={section.type || "fields"}
-        options={[
-          ["fields", "Detail Fields"],
-          ["manualTable", "Manual Table"],
-          ["dataTable", "Data Table"],
-          ["relatedTable", "Related Table (Legacy)"],
-        ]}
-        onChange={(v) =>
-          set(`reportView.popupSections.${index}.type`, v)
-        }
-      />
-    </Field>
+    <Group>Section type</Group>
+    <SegBar
+      value={section.type || "fields"}
+      options={[
+        ["fields", "Detail fields"],
+        ["manualTable", "Line items"],
+        ["dataTable", "Data table"],
+        ...(section.type === "relatedTable"
+          ? [["relatedTable", "Related (legacy)"]]
+          : []),
+      ]}
+      onChange={(v) => changePopupType(index, section, v)}
+    />
 
     {section.type === "manualTable" && (
       <ManualTableData
@@ -1879,6 +2174,27 @@ function Panel({ box, cols }) {
         </Field>
         )}
 
+        <Row>
+          <Field label="Rows">
+            <Select
+              value={section.limit || 100}
+              numeric
+              options={[5, 10, 15, 25, 50, 100]}
+              onChange={(v) =>
+                set(`reportView.popupSections.${index}.limit`, v)
+              }
+            />
+          </Field>
+        </Row>
+
+        <Switch
+          on={section.zebra === true}
+          label="Striped rows"
+          onChange={(v) =>
+            set(`reportView.popupSections.${index}.zebra`, v)
+          }
+        />
+
         <Field label="Displayed database columns">
           <Hint>
             {section.mode === "standalone"
@@ -1940,8 +2256,47 @@ function Panel({ box, cols }) {
                 {renderColumnEditor(
                   section.columns || [],
                   `reportView.popupSections.${index}.columns`,
-                  filtered
+                  filtered,
+                  { move: true, fmt: true, align: true }
                 )}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="pb"
+                    onClick={() =>
+                      addColumn(
+                        `reportView.popupSections.${index}.columns`,
+                        section.columns
+                      )
+                    }
+                  >
+                    + Add Column
+                  </button>
+
+                  <button
+                    type="button"
+                    className="pb"
+                    onClick={() => {
+                      const existing = new Set(
+                        (section.columns || []).map((c) => c.col).filter(Boolean)
+                      );
+                      set(`reportView.popupSections.${index}.columns`, [
+                        ...(section.columns || []),
+                        ...getColumns(section.table)
+                          .filter((name) => !existing.has(name))
+                          .map((name) => ({
+                            col: name,
+                            label: name.split(".").pop(),
+                            fmt: "auto",
+                            align: "left",
+                          })),
+                      ]);
+                    }}
+                  >
+                    + Add All Columns
+                  </button>
+                </div>
               </>
             );
           }
@@ -2144,9 +2499,29 @@ function Panel({ box, cols }) {
   </div>
 )}
 
-    {section.type !== "dataTable" && renderColumnEditor(
-      section.columns || [],
-      `reportView.popupSections.${index}.columns`
+    {section.type !== "dataTable" && section.type !== "manualTable" && (
+      <>
+        {renderColumnEditor(
+          section.columns || [],
+          `reportView.popupSections.${index}.columns`,
+          availableColumns,
+          { move: true, fmt: true }
+        )}
+
+        <button
+          type="button"
+          className="pb"
+          style={{ marginTop: 10 }}
+          onClick={() =>
+            addColumn(
+              `reportView.popupSections.${index}.columns`,
+              section.columns
+            )
+          }
+        >
+          + Add Field
+        </button>
+      </>
     )}
 
     <button
@@ -2164,37 +2539,33 @@ function Panel({ box, cols }) {
   </div>
 ))}
 
-<button
-  type="button"
-  className="pb"
-  onClick={() =>
-    set("reportView.popupSections", [
-      ...(config.popupSections || []),
-      {
-        id: `section-${Date.now()}`,
-        title: "New Section",
-        type: "fields",
-        columns: [],
-        manualTable: {
-          columns: [
-            { id: `col-${Date.now()}`, label: "Item" },
-            { id: `col-${Date.now()}-2`, label: "Quantity" },
-            { id: `col-${Date.now()}-3`, label: "Amount" },
-          ],
-          rows: [
-            { id: `row-${Date.now()}`, cells: ["", "", ""] },
-          ],
-          zebra: true,
-        },
-        table: "",
-        parentColumn: "",
-        relatedColumn: "",
-      },
-    ])
-  }
->
-  + Add Box
-</button>
+<div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+  <button
+    type="button"
+    className="pb"
+    onClick={() =>
+      set("reportView.popupSections", [
+        ...(config.popupSections || []),
+        newPopupSection("fields"),
+      ])
+    }
+  >
+    + Add Box
+  </button>
+
+  <button
+    type="button"
+    className="pb"
+    onClick={() =>
+      set("reportView.popupSections", [
+        ...(config.popupSections || []),
+        newPopupSection("manualTable"),
+      ])
+    }
+  >
+    + Add Line Items
+  </button>
+</div>
                 <Group>Data Source</Group>
                 <SourceEditor box={box} />
               </>

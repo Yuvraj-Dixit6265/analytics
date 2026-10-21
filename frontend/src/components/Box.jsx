@@ -1916,6 +1916,8 @@ function Panel({ box, cols }) {
           };
           const search = popupColumnSearch[section.id || index] || "";
           const sourceMode = section.columnSource || "table";
+          const columnPath = `reportView.popupSections.${index}.columns`;
+          const selectedColumns = section.columns || [];
 
           if (sourceMode === "table") {
             const filtered = getColumns(section.table).filter((name) =>
@@ -1944,60 +1946,177 @@ function Panel({ box, cols }) {
             );
           }
 
-          const columnPath = `reportView.popupSections.${index}.columns`;
-          return (
-            <div className="collist">
-              {(section.columns || []).map((col, columnIndex) => {
-                const sourceTable = col.table || section.table || "";
-                const filtered = getColumns(sourceTable).filter((name) =>
-                  name.toLowerCase().includes(search.trim().toLowerCase())
+      const allColumns = catalogTables.flatMap((table) =>
+        (table.columns || [])
+          .map((column) => {
+            const name =
+              typeof column === "string" ? column : column.name;
+
+            if (!name) return null;
+
+            return {
+              table: table.name,
+              name,
+              type:
+                typeof column === "object"
+                  ? column.column_type ||
+                    column.data_type ||
+                    column.type ||
+                    ""
+                  : "",
+            };
+          })
+          .filter(Boolean)
+      );
+
+      const matchingColumns = allColumns.filter((column) =>
+        `${column.table} ${column.name} ${column.type}`
+          .toLowerCase()
+          .includes(search.trim().toLowerCase())
+      );
+
+      const addDatabaseColumn = (column) => {
+        const exists = selectedColumns.some(
+          (item) =>
+            (item.table || section.table) === column.table &&
+            item.col === column.name
+        );
+
+        if (exists) return;
+
+        set(columnPath, [
+          ...selectedColumns,
+          {
+            table: column.table,
+            col: column.name,
+            key: `${column.table}.${column.name}`,
+            label: column.name,
+            fmt: "auto",
+          },
+        ]);
+      };
+
+      return (
+        <div className="collist">
+          <Field label="Search all database columns">
+            <Text
+              value={search}
+              placeholder="Search any table or column…"
+              onChange={(value) =>
+                setPopupColumnSearch((current) => ({
+                  ...current,
+                  [section.id || index]: value,
+                }))
+              }
+            />
+          </Field>
+
+          <Hint>
+            Search the database catalog by table name, column name, or
+            data type. Add the columns you want to display.
+          </Hint>
+
+          <Field label={`Search results (${matchingColumns.length})`}>
+            <div
+              style={{
+                maxHeight: 280,
+                overflowY: "auto",
+                border: "1px solid var(--border, #ddd)",
+                borderRadius: 8,
+              }}
+            >
+              {matchingColumns.slice(0, 200).map((column) => {
+                const exists = selectedColumns.some(
+                  (item) =>
+                    (item.table || section.table) === column.table &&
+                    item.col === column.name
                 );
+
+                return (
+                  <div
+                    key={`${column.table}.${column.name}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      padding: "8px 10px",
+                      borderBottom: "1px solid var(--border, #eee)",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 500 }}>
+                        {column.table}.{column.name}
+                      </div>
+
+                      {column.type && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            opacity: 0.7,
+                            overflowWrap: "anywhere",
+                          }}
+                        >
+                          {column.type}
+                        </div>
+                      )}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="pb"
+                      disabled={exists}
+                      onClick={() => addDatabaseColumn(column)}
+                    >
+                      {exists ? "Added" : "+ Add"}
+                    </button>
+                  </div>
+                );
+              })}
+
+              {matchingColumns.length === 0 && (
+                <p style={{ padding: 12 }}>
+                  {search.trim()
+                    ? "No matching database columns."
+                    : "Enter a search term to find columns across the database."}
+                </p>
+              )}
+
+              {matchingColumns.length > 200 && (
+                <p style={{ padding: 10, fontSize: 12 }}>
+                  Showing the first 200 matches. Refine your search.
+                </p>
+              )}
+            </div>
+          </Field>
+
+          <Field label={`Selected columns (${selectedColumns.length})`}>
+            {selectedColumns.length === 0 ? (
+              <Hint>
+                No columns added yet. Search above and click + Add.
+              </Hint>
+            ) : (
+              selectedColumns.map((column, columnIndex) => {
                 const rowPath = `${columnPath}.${columnIndex}`;
+
                 return (
                   <div className="colrow" key={rowPath}>
-                    <Field label="Source table">
-                      <Select
-                        value={sourceTable}
-                        options={[
-                          ["", "Select source table"],
-                          ...catalogTables.map((table) => [
-                            table.name,
-                            table.name,
-                          ]),
-                        ]}
-                        onChange={(value) => {
-                          set(`${rowPath}.table`, value);
-                          set(`${rowPath}.col`, "");
-                          set(`${rowPath}.key`, "");
-                        }}
-                      />
-                    </Field>
-                    <Field label="Database column">
-                      <Select
-                        value={col.col || ""}
-                        options={[
-                          ["", "Select column"],
-                          ...filtered.map((name) => [name, name]),
-                        ]}
-                        onChange={(value) => {
-                          set(`${rowPath}.col`, value);
-                          set(
-                            `${rowPath}.key`,
-                            value ? `${sourceTable}.${value}` : ""
-                          );
-                          if (value && !col.label) {
-                            set(`${rowPath}.label`, value);
-                          }
-                        }}
-                      />
-                    </Field>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500 }}>
+                        {column.table || section.table}.{column.col}
+                      </div>
+                    </div>
+
                     <Field label="Display heading">
                       <Text
-                        value={col.label || ""}
-                        placeholder="Heading"
-                        onChange={(value) => set(`${rowPath}.label`, value)}
+                        value={column.label || ""}
+                        placeholder={column.col}
+                        onChange={(value) =>
+                          set(`${rowPath}.label`, value)
+                        }
                       />
                     </Field>
+
                     <button
                       type="button"
                       className="xbtn"
@@ -2005,8 +2124,9 @@ function Panel({ box, cols }) {
                       onClick={() =>
                         set(
                           columnPath,
-                          (section.columns || []).filter(
-                            (_, itemIndex) => itemIndex !== columnIndex
+                          selectedColumns.filter(
+                            (_, itemIndex) =>
+                              itemIndex !== columnIndex
                           )
                         )
                       }
@@ -2015,51 +2135,18 @@ function Panel({ box, cols }) {
                     </button>
                   </div>
                 );
-              })}
-            </div>
-          );
-        })()}
-
-        <button
-          type="button"
-          className="pb"
-          onClick={() =>
-            set(`reportView.popupSections.${index}.columns`, [
-              ...(section.columns || []),
-              {
-                col: "",
-                table: section.table || "",
-                key: "",
-                label: "",
-                fmt: "auto",
-              },
-            ])
-          }
-        >
-          + Add Database Column
-        </button>
-      </div>
-    )}
+              })
+            )}
+          </Field>
+        </div>
+      );
+    })()}
+  </div>
+)}
 
     {section.type !== "dataTable" && renderColumnEditor(
       section.columns || [],
       `reportView.popupSections.${index}.columns`
-    )}
-
-    {section.type !== "dataTable" && (
-      <button
-        type="button"
-        className="pb"
-        onClick={() => {
-          const current = section.columns || [];
-          set(`reportView.popupSections.${index}.columns`, [
-            ...current,
-            { col: "", label: "", fmt: "auto" },
-          ]);
-        }}
-      >
-        + Add Column
-      </button>
     )}
 
     <button
@@ -2116,33 +2203,33 @@ function Panel({ box, cols }) {
 
           {box.kind === "value" && <ValueData box={box} set={set} />}
           {box.kind === "chart" && <ChartData box={box} set={set} />}
-          {box.kind === "table" && (
-            <>
-              <Group>Table type</Group>
+            {box.kind === "table" && (
+              <>
+                <Group>Table type</Group>
 
-              <SegBar
-                value={box.tableMode || "data"}
-                options={[
-                  ["data", "Data table"],
-                  ["graph", "Graph table"],
-                  ["manual", "Manual table"],
-                ]}
-                onChange={(v) => set("tableMode", v)}
-              />
+                <SegBar
+                  value={box.tableMode || "data"}
+                  options={[
+                    ["data", "Data table"],
+                    ["graph", "Graph table"],
+                    ["manual", "Manual table"],
+                  ]}
+                  onChange={(v) => set("tableMode", v)}
+                />
 
-              {box.tableMode === "data" && (
-                <TableData box={box} set={set} />
-              )}
+                {box.tableMode === "data" && (
+                  <TableData box={box} set={set} />
+                )}
 
-              {box.tableMode === "graph" && (
-                <GraphTableData box={box} set={set} />
-              )}
+                {box.tableMode === "graph" && (
+                  <GraphTableData box={box} set={set} />
+                )}
 
-              {box.tableMode === "manual" && (
-                <ManualTableData box={box} set={set} />
-              )}
-            </>
-        )}
+                {box.tableMode === "manual" && (
+                  <ManualTableData box={box} set={set} />
+                )}
+              </>
+            )}
           {box.kind === "note" && (
             <Hint>Click into the box and type. Use <b>Format</b> for size, colour and alignment.</Hint>
           )}

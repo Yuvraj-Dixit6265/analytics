@@ -162,15 +162,16 @@ const newPopupManualTable = () => {
   };
 };
 
-const newPopupSection = (type = "fields") => ({
+const newPopupSection = (type = "fields", keyColumn = "") => ({
   id: uid("section"),
   title:
-    type === "dataTable"
+    type === "dataTable" || type === "lineItems"
       ? "Line Items"
       : type === "manualTable"
       ? "Manual Table"
       : "New Section",
   type,
+  keyColumn,
   columns: [],
   manualTable: newPopupManualTable(),
   table: "",
@@ -190,6 +191,12 @@ const popupSectionReady = (section) => {
     if (!section.table) return false;
     if (isStandaloneSection(section)) return true;
     return !!(section.relationship?.fromColumn && section.relationship?.toColumn);
+  }
+  if (section.type === "lineItems") {
+    return !!(
+      section.keyColumn &&
+      (section.columns || []).some((c) => c.col)
+    );
   }
   if (section.type === "relatedTable") {
     return !!(section.table && section.parentColumn && section.relatedColumn);
@@ -232,6 +239,7 @@ React.useEffect(() => {
         !!selectedReportRecord &&
         (
           section.type === "relatedTable" ||
+          section.type === "lineItems" ||
           (section.type === "dataTable" && section.mode !== "standalone")
         )
       )
@@ -241,6 +249,50 @@ React.useEffect(() => {
 
   let cancelled = false;
   const controller = new AbortController();
+
+  /* Same lookup the main table's row-detail list uses, so line items can
+     pull columns from any table for the record that is open. */
+  const toAlias = (n) => String(n || "").replace(/\./g, "__");
+  const loadLineItems = async (section) => {
+    const keyCol = section.keyColumn;
+    const record = selectedReportRecord || {};
+    const raw = record[toAlias(keyCol)] ?? record[keyCol];
+    if (raw === undefined || raw === null || raw === "") return { rows: [] };
+
+    const value = String(raw);
+    const detailColumns = (section.columns || []).map((c) => c.col).filter(Boolean);
+    const limit = section.limit || 100;
+
+    if (window.location.pathname.includes("/r/")) {
+      const [, publicPath] = window.location.pathname.split("/r/");
+      const [publicKey, publicToken] = publicPath.split("/");
+      const params = new URLSearchParams({
+        parentTable: box?.src?.base || "",
+        lookupColumn: keyCol,
+        value,
+        detailColumns: detailColumns.join(","),
+        limit: String(limit),
+      });
+      const vt = new URLSearchParams(window.location.search).get("vt");
+      if (vt) params.set("vt", vt);
+
+      const res = await fetch(
+        `/api/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`,
+        { signal: controller.signal }
+      );
+      if (!res.ok) throw new Error("Could not load line items");
+      return await res.json();
+    }
+
+    return api.getDetailRows(
+      state.processKey,
+      box?.src?.base || "",
+      keyCol,
+      value,
+      detailColumns,
+      limit
+    );
+  };
 
   async function loadRelatedRows() {
     const initial = {};
@@ -261,7 +313,9 @@ React.useEffect(() => {
             throw new Error("Save this popup section before using it.");
           }
 
-          const data = publicSlug
+          const data = section.type === "lineItems"
+            ? await loadLineItems(section)
+            : publicSlug
             ? await api.publicReportViewRelatedRows(
                 publicSlug,
                 box.id,
@@ -341,8 +395,13 @@ React.useEffect(() => {
     const popupSections = config.popupSections || [];
     const setBox = (path, value) =>
       dispatch({ type: "set", target: "box", id: box.id, path, value });
+    const defaultKeyColumn =
+      config.clickableColumn || (config.columns || []).find((c) => c.col)?.col || "";
     const addPopupSection = (type) =>
-      setBox("reportView.popupSections", [...popupSections, newPopupSection(type)]);
+      setBox("reportView.popupSections", [
+        ...popupSections,
+        newPopupSection(type, defaultKeyColumn),
+      ]);
     const removePopupSection = (index) =>
       setBox(
         "reportView.popupSections",
@@ -368,12 +427,24 @@ React.useEffect(() => {
         .filter(Boolean)
         .map((name) => [`${t.name}.${name}`, `${t.name}.${name}`])
     );
-    const relationshipsFor = (tableName) =>
-      (state.catalog?.relationships || []).filter(
-        (r) =>
-          r.from_table === tableName &&
-          r.to_table === (box?.src?.base || "") &&
-          r.to_unique
+    const relationshipsFor = (tableName) => {
+      const parent = box?.src?.base || "";
+      return (state.catalog?.relationships || []).flatMap((r) => {
+        if (r.from_table === tableName && r.to_table === parent)
+          return [{ fromColumn: r.from_column, toColumn: r.to_column }];
+        if (r.from_table === parent && r.to_table === tableName)
+          return [{ fromColumn: r.to_column, toColumn: r.from_column }];
+        return [];
+      });
+    };
+    const parentTableName = box?.src?.base || "";
+    const parentColumnNames = colOptions(state.catalog, box.src)
+      .map((c) => c.name)
+      .filter(Boolean)
+      .map((n) =>
+        parentTableName && n.startsWith(`${parentTableName}.`)
+          ? n.slice(parentTableName.length + 1)
+          : n
       );
 
     /* Pick the table, how it links to the open record, and its columns —
@@ -383,25 +454,42 @@ React.useEffect(() => {
       const cols = section.columns || [];
       const standalone = isStandaloneSection(section);
       const used = new Set(cols.map((c) => c.col));
-      const addable = tableColumnNames(section.table).filter((n) => !used.has(n));
+      const tableCols = tableColumnNames(section.table);
+      const addable = tableCols.filter((n) => !used.has(n));
       const rels = relationshipsFor(section.table);
+      const relKey = (r) => `${r?.fromColumn}|${r?.toColumn}`;
+      const link = section.relationship || {};
+      const setLink = (patch) =>
+        setBox(`${base}.relationship`, {
+          fromColumn: link.fromColumn || "",
+          toColumn: link.toColumn || "",
+          ...patch,
+        });
+
+      const labelled = (text, control) => (
+        <label style={{ display: "grid", gap: 2, fontSize: 11, opacity: 0.95 }}>
+          <span style={{ opacity: 0.7 }}>{text}</span>
+          {control}
+        </label>
+      );
 
       return (
         <div
           style={{
             border: "1px dashed var(--border, #bbb)",
             borderRadius: 8,
-            padding: 8,
+            padding: 10,
             margin: "6px 0 10px",
             display: "grid",
-            gap: 8,
+            gap: 10,
           }}
         >
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {labelled(
+            standalone ? "Database table" : "Line item table",
             <Select
               value={section.table || ""}
               options={[
-                ["", "Select line item table"],
+                ["", "Select a table"],
                 ...catalogTableList.map((t) => [t.name, t.name]),
               ]}
               onChange={(v) => {
@@ -410,81 +498,104 @@ React.useEffect(() => {
                 const candidates = relationshipsFor(v);
                 setBox(
                   `${base}.relationship`,
-                  !standalone && candidates.length === 1
-                    ? {
-                        fromColumn: candidates[0].from_column,
-                        toColumn: candidates[0].to_column,
-                      }
-                    : null
+                  !standalone && candidates.length === 1 ? candidates[0] : null
                 );
               }}
             />
+          )}
 
-            {!standalone && (
+          {!standalone && section.table && (
+            <div style={{ display: "grid", gap: 6 }}>
+              {rels.length > 0 &&
+                labelled(
+                  "Detected link to the invoice",
+                  <Select
+                    value={link.fromColumn && link.toColumn ? relKey(link) : ""}
+                    options={[
+                      ["", "Choose a detected link"],
+                      ...rels.map((r) => [
+                        relKey(r),
+                        `${section.table}.${r.fromColumn} = ${parentTableName}.${r.toColumn}`,
+                      ]),
+                    ]}
+                    onChange={(v) => {
+                      const picked = rels.find((r) => relKey(r) === v);
+                      setBox(`${base}.relationship`, picked || null);
+                    }}
+                  />
+                )}
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end" }}>
+                {labelled(
+                  `${section.table} column`,
+                  <Select
+                    value={link.fromColumn || ""}
+                    options={[["", "Select column"], ...tableCols]}
+                    onChange={(v) => setLink({ fromColumn: v })}
+                  />
+                )}
+                <span style={{ paddingBottom: 6 }}>=</span>
+                {labelled(
+                  `${parentTableName || "Invoice"} column`,
+                  <Select
+                    value={link.toColumn || ""}
+                    options={[["", "Select column"], ...parentColumnNames]}
+                    onChange={(v) => setLink({ toColumn: v })}
+                  />
+                )}
+              </div>
+
+              {!rels.length && (
+                <div style={{ fontSize: 12, opacity: 0.75 }}>
+                  No saved relationship between {section.table} and{" "}
+                  {parentTableName || "the report table"}. Pick the two matching
+                  columns above (for example invoice_id = id).
+                </div>
+              )}
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end" }}>
+            {labelled(
+              "Add column from this table",
               <Select
-                value={
-                  section.relationship
-                    ? `${section.relationship.fromColumn}|${section.relationship.toColumn}`
-                    : ""
-                }
-                options={[
-                  [
-                    "",
-                    rels.length ? "Link to invoice by…" : "No link to this report's table",
-                  ],
-                  ...rels.map((r) => [
-                    `${r.from_column}|${r.to_column}`,
-                    `${r.from_column} → ${r.to_table}.${r.to_column}`,
-                  ]),
-                ]}
+                value=""
+                options={[["", "Choose column…"], ...addable]}
                 onChange={(v) => {
-                  const picked = rels.find(
-                    (r) => `${r.from_column}|${r.to_column}` === v
-                  );
-                  setBox(
-                    `${base}.relationship`,
-                    picked
-                      ? { fromColumn: picked.from_column, toColumn: picked.to_column }
-                      : null
-                  );
+                  if (!v) return;
+                  setBox(`${base}.columns`, [
+                    ...cols,
+                    { col: v, label: v.split(".").pop(), fmt: "auto", align: "left" },
+                  ]);
                 }}
               />
             )}
 
-            <Select
-              value=""
-              options={[["", "+ Add column from this table"], ...addable]}
-              onChange={(v) => {
-                if (!v) return;
-                setBox(`${base}.columns`, [
-                  ...cols,
-                  { col: v, label: v.split(".").pop(), fmt: "auto", align: "left" },
-                ]);
-              }}
-            />
-
-            <Select
-              value=""
-              options={[["", "+ Add column from any table"], ...allTableColumns]}
-              onChange={(v) => {
-                if (!v) return;
-                const [tableName, ...rest] = v.split(".");
-                const name = rest.join(".");
-                setBox(`${base}.columns`, [
-                  ...cols,
-                  tableName === section.table
-                    ? { col: name, label: name, fmt: "auto", align: "left" }
-                    : {
-                        table: tableName,
-                        col: name,
-                        key: v,
-                        label: name,
-                        fmt: "auto",
-                        align: "left",
-                      },
-                ]);
-              }}
-            />
+            {labelled(
+              "Add column from any table",
+              <Select
+                value=""
+                options={[["", "Choose column…"], ...allTableColumns]}
+                onChange={(v) => {
+                  if (!v) return;
+                  const [tableName, ...rest] = v.split(".");
+                  const name = rest.join(".");
+                  setBox(`${base}.columns`, [
+                    ...cols,
+                    tableName === section.table
+                      ? { col: name, label: name, fmt: "auto", align: "left" }
+                      : {
+                          table: tableName,
+                          col: name,
+                          key: v,
+                          label: name,
+                          fmt: "auto",
+                          align: "left",
+                        },
+                  ]);
+                }}
+              />
+            )}
 
             <button
               type="button"
@@ -519,6 +630,137 @@ React.useEffect(() => {
                     borderRadius: 12,
                     fontSize: 12,
                   }}
+                >
+                  <button
+                    type="button"
+                    className="xbtn"
+                    title="Move left"
+                    disabled={i === 0}
+                    onClick={() => {
+                      const next = [...cols];
+                      [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                      setBox(`${base}.columns`, next);
+                    }}
+                  >
+                    ←
+                  </button>
+                  <Editable
+                    value={c.label || c.col}
+                    placeholder="Heading"
+                    style={{ display: "inline-block", minWidth: 40 }}
+                    onChange={(v) => setBox(`${base}.columns.${i}.label`, v)}
+                  />
+                  <button
+                    type="button"
+                    className="xbtn"
+                    title="Move right"
+                    disabled={i === cols.length - 1}
+                    onClick={() => {
+                      const next = [...cols];
+                      [next[i + 1], next[i]] = [next[i], next[i + 1]];
+                      setBox(`${base}.columns`, next);
+                    }}
+                  >
+                    →
+                  </button>
+                  <button
+                    type="button"
+                    className="xbtn"
+                    title="Remove column"
+                    onClick={() =>
+                      setBox(
+                        `${base}.columns`,
+                        cols.filter((_, idx) => idx !== i)
+                      )
+                    }
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    /* Line items: choose what identifies the record, then add columns from
+       any table — type to search. */
+    const renderLineItemsBar = (section, sectionIndex) => {
+      const base = `reportView.popupSections.${sectionIndex}`;
+      const cols = section.columns || [];
+      const keyOptions = (config.columns || [])
+        .filter((c) => c.col)
+        .map((c) => [c.col, c.label || c.col]);
+      const known = new Set(allTableColumns.map((o) => o[0]));
+      const listId = `li-cols-${box.id}-${sectionIndex}`;
+
+      const addColumn = (v) =>
+        setBox(`${base}.columns`, [
+          ...cols,
+          { col: v, label: v.split(".").pop(), fmt: "auto", align: "left" },
+        ]);
+
+      return (
+        <div
+          style={{
+            border: "1px dashed var(--border, #bbb)",
+            borderRadius: 8,
+            padding: 10,
+            margin: "6px 0 10px",
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end" }}>
+            <label style={{ display: "grid", gap: 2, fontSize: 11 }}>
+              <span style={{ opacity: 0.7 }}>Match line items to this record by</span>
+              <Select
+                value={section.keyColumn || ""}
+                options={[["", "Select column"], ...keyOptions]}
+                onChange={(v) => setBox(`${base}.keyColumn`, v)}
+              />
+            </label>
+
+            <label style={{ display: "grid", gap: 2, fontSize: 11, flex: 1, minWidth: 220 }}>
+              <span style={{ opacity: 0.7 }}>
+                Add a column from any table — type to search (e.g. uom, material)
+              </span>
+              <input
+                list={listId}
+                placeholder="table.column"
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (known.has(v)) {
+                    addColumn(v);
+                    e.target.value = "";
+                  }
+                }}
+                style={{ padding: "6px 8px" }}
+              />
+              <datalist id={listId}>
+                {allTableColumns.map(([value]) => (
+                  <option key={value} value={value} />
+                ))}
+              </datalist>
+            </label>
+          </div>
+
+          {cols.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {cols.map((c, i) => (
+                <span
+                  key={`${c.col}-${i}`}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "2px 6px",
+                    border: "1px solid var(--border, #ccc)",
+                    borderRadius: 12,
+                    fontSize: 12,
+                  }}
+                  title={c.col}
                 >
                   <button
                     type="button"
@@ -994,10 +1236,12 @@ React.useEffect(() => {
                             })()}
                           </div>
                         ) : section.type === "relatedTable" ||
-                          section.type === "dataTable" ? (
+                          section.type === "dataTable" ||
+                          section.type === "lineItems" ? (
 
 <div className="report-view-related-table">
   {design && section.type === "dataTable" && renderPopupDataBar(section, sectionIndex)}
+  {design && section.type === "lineItems" && renderLineItemsBar(section, sectionIndex)}
   {(() => {
     const data = freshRows(section);
     const relatedColumns = sectionColumns;
@@ -1006,7 +1250,9 @@ React.useEffect(() => {
       return (
         <p>
           {design
-            ? "Choose the line item table and how it links to the invoice above."
+            ? section.type === "lineItems"
+              ? "Choose what to match on, then add columns above."
+              : "Rows will appear once the line item table is linked to the invoice (pick the matching columns above)."
             : "This section is not configured yet."}
         </p>
       );
@@ -1121,7 +1367,7 @@ React.useEffect(() => {
                   <button
                     type="button"
                     className="pb"
-                    onClick={() => addPopupSection("dataTable")}
+                    onClick={() => addPopupSection("lineItems")}
                   >
                     + Add Box
                   </button>
@@ -2068,6 +2314,14 @@ function Panel({ box, cols }) {
                 },
               ]);
 
+            const lineItemOptions = (state.catalog?.tables || []).flatMap((t) => {
+              if (typeof t === "string") return [];
+              return (t.columns || [])
+                .map((c) => (typeof c === "string" ? c : c.name))
+                .filter(Boolean)
+                .map((name) => [`${t.name}.${name}`, `${t.name}.${name}`]);
+            });
+
             const moveItem = (items, path, index, d) => {
               const next = [...(items || [])];
               const target = index + d;
@@ -2294,8 +2548,9 @@ function Panel({ box, cols }) {
       value={section.type || "fields"}
       options={[
         ["fields", "Detail fields"],
-        ["dataTable", "Line items (database)"],
+        ["lineItems", "Line items"],
         ["manualTable", "Manual table"],
+        ["dataTable", "Data table (advanced)"],
         ...(section.type === "relatedTable"
           ? [["relatedTable", "Related (legacy)"]]
           : []),
@@ -2322,6 +2577,73 @@ function Panel({ box, cols }) {
           set(`reportView.popupSections.${index}.${path}`, value)
         }
       />
+    )}
+
+    {section.type === "lineItems" && (
+      <>
+        <Field label="Match line items to the record by">
+          <Select
+            value={section.keyColumn || ""}
+            options={[
+              ["", "Select column"],
+              ...(config.columns || [])
+                .filter((c) => c.col)
+                .map((c) => [c.col, c.label || c.col]),
+            ]}
+            onChange={(v) =>
+              set(`reportView.popupSections.${index}.keyColumn`, v)
+            }
+          />
+        </Field>
+
+        <Group>Line item columns</Group>
+        {renderColumnEditor(
+          section.columns || [],
+          `reportView.popupSections.${index}.columns`,
+          lineItemOptions,
+          { move: true, fmt: true, align: true }
+        )}
+
+        <button
+          type="button"
+          className="pb"
+          style={{ marginTop: 10 }}
+          onClick={() =>
+            addColumn(
+              `reportView.popupSections.${index}.columns`,
+              section.columns
+            )
+          }
+        >
+          + Add Column
+        </button>
+
+        <Row>
+          <Field label="Rows">
+            <Select
+              value={section.limit || 100}
+              numeric
+              options={[5, 10, 20, 50, 100]}
+              onChange={(v) =>
+                set(`reportView.popupSections.${index}.limit`, v)
+              }
+            />
+          </Field>
+        </Row>
+
+        <Switch
+          on={section.zebra === true}
+          label="Striped rows"
+          onChange={(v) =>
+            set(`reportView.popupSections.${index}.zebra`, v)
+          }
+        />
+
+        <Hint>
+          Pick columns from any table, the same way as the main table's row
+          detail list.
+        </Hint>
+      </>
     )}
 
     {section.type === "relatedTable" && (
@@ -2777,7 +3099,9 @@ function Panel({ box, cols }) {
   </div>
 )}
 
-    {section.type !== "dataTable" && section.type !== "manualTable" && (
+    {section.type !== "dataTable" &&
+      section.type !== "manualTable" &&
+      section.type !== "lineItems" && (
       <>
         {renderColumnEditor(
           section.columns || [],
@@ -2837,7 +3161,12 @@ function Panel({ box, cols }) {
     onClick={() =>
       set("reportView.popupSections", [
         ...(config.popupSections || []),
-        newPopupSection("dataTable"),
+        newPopupSection(
+          "lineItems",
+          config.clickableColumn ||
+            (config.columns || []).find((c) => c.col)?.col ||
+            ""
+        ),
       ])
     }
   >

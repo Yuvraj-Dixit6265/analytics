@@ -1444,6 +1444,7 @@ if (box.tableMode === "graph") {
 function Panel({ box, cols }) {
   const { state, dispatch } = useStore();
   const tab = state.cfgTab;
+  const [popupColumnSearch, setPopupColumnSearch] = React.useState({});
   const set = (path, value) =>
     dispatch({ type: "set", target: "box", id: box.id, path, value });
   const del = () => dispatch({ type: "askDel", sel: { kind: "box", id: box.id } });
@@ -1890,8 +1891,26 @@ function Panel({ box, cols }) {
           const tableColumns = (tableEntry?.columns || []).map((c) =>
             typeof c === "string" ? c : c.name
           ).filter(Boolean);
+          const columnSearch = popupColumnSearch[section.id || index] || "";
+          const filteredTableColumns = tableColumns.filter((name) =>
+            name.toLowerCase().includes(columnSearch.trim().toLowerCase())
+          );
 
-          return (section.columns || []).map((column, columnIndex) => (
+          return (
+            <>
+              <Field label="Search database columns">
+                <Text
+                  value={columnSearch}
+                  placeholder="Search columns…"
+                  onChange={(value) =>
+                    setPopupColumnSearch((current) => ({
+                      ...current,
+                      [section.id || index]: value,
+                    }))
+                  }
+                />
+              </Field>
+              {(section.columns || []).map((column, columnIndex) => (
             <div
               key={`${column.col || "column"}-${columnIndex}`}
               style={{
@@ -1905,14 +1924,21 @@ function Panel({ box, cols }) {
                 value={column.col || ""}
                 options={[
                   ["", "Select column"],
-                  ...tableColumns.map((name) => [name, name]),
+                  ...filteredTableColumns.map((name) => [name, name]),
                 ]}
-                onChange={(v) =>
+                onChange={(v) => {
                   set(
                     `reportView.popupSections.${index}.columns.${columnIndex}.col`,
                     v
-                  )
-                }
+                  );
+                  const currentLabel = column.label || "";
+                  if (!currentLabel || currentLabel === column.col) {
+                    set(
+                      `reportView.popupSections.${index}.columns.${columnIndex}.label`,
+                      v.split(".").pop()
+                    );
+                  }
+                }}
               />
               <Text
                 value={column.label || ""}
@@ -1937,7 +1963,9 @@ function Panel({ box, cols }) {
                 Remove
               </button>
             </div>
-          ));
+              ))}
+            </>
+          );
         })()}
 
         <button
@@ -1960,19 +1988,21 @@ function Panel({ box, cols }) {
       `reportView.popupSections.${index}.columns`
     )}
 
-    <button
-      type="button"
-      className="pb"
-      onClick={() => {
-        const current = section.columns || [];
-        set(`reportView.popupSections.${index}.columns`, [
-          ...current,
-          { col: "", label: "", fmt: "auto" },
-        ]);
-      }}
-    >
-      + Add Column
-    </button>
+    {section.type !== "dataTable" && (
+      <button
+        type="button"
+        className="pb"
+        onClick={() => {
+          const current = section.columns || [];
+          set(`reportView.popupSections.${index}.columns`, [
+            ...current,
+            { col: "", label: "", fmt: "auto" },
+          ]);
+        }}
+      >
+        + Add Column
+      </button>
+    )}
 
     <button
       type="button"

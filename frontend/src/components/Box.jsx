@@ -257,11 +257,21 @@ React.useEffect(() => {
     const keyCol = section.keyColumn;
     const record = selectedReportRecord || {};
     const raw = record[toAlias(keyCol)] ?? record[keyCol];
-    if (raw === undefined || raw === null || raw === "") return { rows: [] };
-
-    const value = String(raw);
     const detailColumns = (section.columns || []).map((c) => c.col).filter(Boolean);
     const limit = section.limit || 100;
+    const debug = {
+      parentTable: box?.src?.base || "",
+      keyColumn: keyCol,
+      value: raw === undefined || raw === null ? "" : String(raw),
+      columns: detailColumns,
+      recordKeys: Object.keys(record),
+    };
+    console.log("LINE ITEMS LOOKUP:", debug);
+    if (raw === undefined || raw === null || raw === "") {
+      return { rows: [], _debug: debug };
+    }
+
+    const value = String(raw);
 
     if (window.location.pathname.includes("/r/")) {
       const [, publicPath] = window.location.pathname.split("/r/");
@@ -281,10 +291,10 @@ React.useEffect(() => {
         { signal: controller.signal }
       );
       if (!res.ok) throw new Error("Could not load line items");
-      return await res.json();
+      return { ...(await res.json()), _debug: debug };
     }
 
-    return api.getDetailRows(
+    const result = await api.getDetailRows(
       state.processKey,
       box?.src?.base || "",
       keyCol,
@@ -292,6 +302,7 @@ React.useEffect(() => {
       detailColumns,
       limit
     );
+    return { ...result, _debug: debug };
   };
 
   async function loadRelatedRows() {
@@ -346,6 +357,7 @@ React.useEffect(() => {
                 loading: false,
                 rows: data.rows || [],
                 error: "",
+                debug: data._debug,
                 rec: popupRecFor(section, recordKey),
               },
             }));
@@ -746,6 +758,13 @@ React.useEffect(() => {
             </label>
           </div>
 
+          {cols.some((c) => !String(c.col).includes(".")) && (
+            <div style={{ fontSize: 12, color: "#B3261E" }}>
+              Some columns have no table name (shown in red). Remove them and add
+              them again by typing table.column.
+            </div>
+          )}
+
           {cols.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {cols.map((c, i) => (
@@ -756,7 +775,9 @@ React.useEffect(() => {
                     alignItems: "center",
                     gap: 4,
                     padding: "2px 6px",
-                    border: "1px solid var(--border, #ccc)",
+                    border: `1px solid ${
+                      String(c.col).includes(".") ? "var(--border, #ccc)" : "#B3261E"
+                    }`,
                     borderRadius: 12,
                     fontSize: 12,
                   }}
@@ -1267,7 +1288,35 @@ React.useEffect(() => {
     }
 
     if (!data.rows.length) {
-      return <p>No related records found.</p>;
+      const d = data.debug;
+      return (
+        <>
+          <p>No related records found.</p>
+          {design && d && (
+            <div style={{ fontSize: 12, opacity: 0.8, display: "grid", gap: 2 }}>
+              <div>
+                Looked up <b>{d.parentTable || "(no table)"}</b> where{" "}
+                <b>{d.keyColumn}</b> = <b>{d.value === "" ? "(empty)" : d.value}</b>
+              </div>
+              <div>Columns asked for: {d.columns.join(", ") || "(none)"}</div>
+              {d.value === "" && (
+                <div style={{ color: "#B3261E" }}>
+                  This record has no value for “{d.keyColumn}”. Its fields are:{" "}
+                  {d.recordKeys.join(", ")}. Pick one of those in “Match line
+                  items to this record by”.
+                </div>
+              )}
+              {d.columns.some((c) => !c.includes(".")) && (
+                <div style={{ color: "#B3261E" }}>
+                  Columns without a table name (
+                  {d.columns.filter((c) => !c.includes(".")).join(", ")}) can't be
+                  found. Remove them and add them again by typing table.column.
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      );
     }
 
     if (!relatedColumns.length) {

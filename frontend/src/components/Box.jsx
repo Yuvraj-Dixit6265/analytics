@@ -186,7 +186,7 @@ const newPopupSection = (type = "fields", keyColumn = "") => ({
 const isStandaloneSection = (section) =>
   section.type === "dataTable" && section.mode === "standalone";
 
-const popupSectionReady = (section) => {
+const popupSectionReady = (section, fallbackKey = "") => {
   if (section.type === "dataTable") {
     if (!section.table) return false;
     if (isStandaloneSection(section)) return true;
@@ -194,7 +194,7 @@ const popupSectionReady = (section) => {
   }
   if (section.type === "lineItems") {
     return !!(
-      section.keyColumn &&
+      (section.keyColumn || fallbackKey) &&
       (section.columns || []).some((c) => c.col)
     );
   }
@@ -232,6 +232,11 @@ function Body({ box }) {
 React.useEffect(() => {
   if (box.kind !== "reportView") return;
 
+  const fallbackKey =
+    box.reportView?.clickableColumn ||
+    (box.reportView?.columns || []).find((c) => c.col)?.col ||
+    "";
+
   const sections = (box.reportView?.popupSections || []).filter(
     (section) =>
       (section.type === "dataTable" && section.mode === "standalone") ||
@@ -243,7 +248,7 @@ React.useEffect(() => {
           (section.type === "dataTable" && section.mode !== "standalone")
         )
       )
-  ).filter(popupSectionReady);
+  ).filter((sec) => popupSectionReady(sec, fallbackKey));
 
   if (!sections.length) return;
 
@@ -254,7 +259,7 @@ React.useEffect(() => {
      pull columns from any table for the record that is open. */
   const toAlias = (n) => String(n || "").replace(/\./g, "__");
   const loadLineItems = async (section) => {
-    const keyCol = section.keyColumn;
+    const keyCol = section.keyColumn || fallbackKey;
     const record = selectedReportRecord || {};
     const raw = record[toAlias(keyCol)] ?? record[keyCol];
     const detailColumns = (section.columns || []).map((c) => c.col).filter(Boolean);
@@ -701,9 +706,17 @@ React.useEffect(() => {
     const renderLineItemsBar = (section, sectionIndex) => {
       const base = `reportView.popupSections.${sectionIndex}`;
       const cols = section.columns || [];
-      const keyOptions = (config.columns || [])
+      const visiblePairs = (config.columns || [])
         .filter((c) => c.col)
         .map((c) => [c.col, c.label || c.col]);
+      const seenKeys = new Set(visiblePairs.map((p) => p[0]));
+      const keyOptions = [
+        ...visiblePairs,
+        ...colOptions(state.catalog, box.src)
+          .map((c) => c.name)
+          .filter((n) => n && !seenKeys.has(n))
+          .map((n) => [n, n]),
+      ];
       const known = new Set(allTableColumns.map((o) => o[0]));
       const listId = `li-cols-${box.id}-${sectionIndex}`;
 
@@ -728,7 +741,7 @@ React.useEffect(() => {
             <label style={{ display: "grid", gap: 2, fontSize: 11 }}>
               <span style={{ opacity: 0.7 }}>Match line items to this record by</span>
               <Select
-                value={section.keyColumn || ""}
+                value={section.keyColumn || defaultKeyColumn || ""}
                 options={[["", "Select column"], ...keyOptions]}
                 onChange={(v) => setBox(`${base}.keyColumn`, v)}
               />
@@ -973,7 +986,7 @@ React.useEffect(() => {
               >
                 <h4>{section.title || "Data Table"}</h4>
                 {design && renderPopupDataBar(section, sectionIndex)}
-                {!popupSectionReady(section) ? (
+                {!popupSectionReady(section, defaultKeyColumn) ? (
                   <p>Choose a database table above.</p>
                 ) : data?.loading || !data ? (
                   <p>Loading database records…</p>
@@ -1267,7 +1280,7 @@ React.useEffect(() => {
     const data = freshRows(section);
     const relatedColumns = sectionColumns;
 
-    if (!popupSectionReady(section)) {
+    if (!popupSectionReady(section, defaultKeyColumn)) {
       return (
         <p>
           {design
@@ -2632,12 +2645,20 @@ function Panel({ box, cols }) {
       <>
         <Field label="Match line items to the record by">
           <Select
-            value={section.keyColumn || ""}
+            value={
+              section.keyColumn ||
+              config.clickableColumn ||
+              (config.columns || []).find((c) => c.col)?.col ||
+              ""
+            }
             options={[
               ["", "Select column"],
               ...(config.columns || [])
                 .filter((c) => c.col)
                 .map((c) => [c.col, c.label || c.col]),
+              ...availableColumns
+                .filter((n) => !(config.columns || []).some((c) => c.col === n))
+                .map((n) => [n, n]),
             ]}
             onChange={(v) =>
               set(`reportView.popupSections.${index}.keyColumn`, v)

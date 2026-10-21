@@ -1560,7 +1560,11 @@ function Panel({ box, cols }) {
                 },
               ]);
 
-            const renderColumnEditor = (items, path) => (
+            const renderColumnEditor = (
+              items,
+              path,
+              columnOptions = availableColumns
+            ) => (
               <div className="collist">
                 {(items || []).map((col, i) => (
                   <div className="colrow" key={`${path}-${i}`}>
@@ -1569,7 +1573,7 @@ function Panel({ box, cols }) {
                         value={col.col || ""}
                         options={[
                           ["", "Select column"],
-                          ...availableColumns,
+                          ...columnOptions,,
                         ]}
                         onChange={(v) => {
                           set(`${path}.${i}.col`, v);
@@ -1910,60 +1914,11 @@ function Panel({ box, cols }) {
                   }
                 />
               </Field>
-              {(section.columns || []).map((column, columnIndex) => (
-            <div
-              key={`${column.col || "column"}-${columnIndex}`}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto",
-                gap: 8,
-                marginBottom: 8,
-              }}
-            >
-              <Select
-                value={column.col || ""}
-                options={[
-                  ["", "Select column"],
-                  ...filteredTableColumns.map((name) => [name, name]),
-                ]}
-                onChange={(v) => {
-                  set(
-                    `reportView.popupSections.${index}.columns.${columnIndex}.col`,
-                    v
-                  );
-                  const currentLabel = column.label || "";
-                  if (!currentLabel || currentLabel === column.col) {
-                    set(
-                      `reportView.popupSections.${index}.columns.${columnIndex}.label`,
-                      v.split(".").pop()
-                    );
-                  }
-                }}
-              />
-              <Text
-                value={column.label || ""}
-                placeholder="Display label"
-                onChange={(v) =>
-                  set(
-                    `reportView.popupSections.${index}.columns.${columnIndex}.label`,
-                    v
-                  )
-                }
-              />
-              <button
-                type="button"
-                className="xbtn"
-                onClick={() =>
-                  set(
-                    `reportView.popupSections.${index}.columns`,
-                    (section.columns || []).filter((_, i) => i !== columnIndex)
-                  )
-                }
-              >
-                Remove
-              </button>
-            </div>
-              ))}
+              {renderColumnEditor(
+                section.columns || [],
+                `reportView.popupSections.${index}.columns`,
+                filteredTableColumns
+              )}
             </>
           );
         })()}

@@ -1613,7 +1613,7 @@ function Panel({ box, cols }) {
             value={section.table || ""}
             options={[
               ["", "Select related table"],
-              ...((state.catalog || []).map((t) =>
+              ...((state.catalog?.tables || []).map((t) =>
                 typeof t === "string"
                   ? [t, t]
                   : [t.name, t.name]

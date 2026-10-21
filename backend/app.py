@@ -1700,7 +1700,6 @@ def _report_view_related_rows_for_definition(
     if (
         not box_id
         or not section_id
-        or not isinstance(record, dict)
         or not isinstance(filters_state, dict)
     ):
         raise ValueError("invalid report-view request")
@@ -1726,6 +1725,13 @@ def _report_view_related_rows_for_definition(
         raise PermissionError("related section not available")
 
     section_type = section.get("type")
+    standalone = (
+        section_type == "dataTable"
+        and section.get("mode") == "standalone"
+    )
+    if not standalone and not isinstance(record, dict):
+        raise ValueError("a report record is required for related rows")
+
     parent_table = str((box.get("src") or {}).get("base") or "")
     detail_table = str(section.get("table") or "")
     columns = [
@@ -1734,17 +1740,55 @@ def _report_view_related_rows_for_definition(
         if isinstance(c, dict) and c.get("col")
     ]
 
-    if not parent_table or not detail_table or not columns:
+    if not detail_table or not columns:
+        raise ValueError("data table section is incomplete")
+    if not standalone and not parent_table:
         raise ValueError("related section is incomplete")
 
     tables = db.introspect(conn_row)
     catalogue = db.catalogue_index(tables)
     relationships = db.relationships(conn_row, tables)
 
-    if parent_table not in catalogue or detail_table not in catalogue:
+    if detail_table not in catalogue:
         raise BadDefinition("invalid configured table")
+    if not standalone and parent_table not in catalogue:
+        raise BadDefinition("invalid report table")
     if any(c not in catalogue[detail_table] for c in columns):
-        raise BadDefinition("invalid related-table field")
+        raise BadDefinition("invalid data-table field")
+
+    if standalone:
+        from querybuilder import vendor_condition
+
+        where = []
+        params = []
+        if force:
+            condition = vendor_condition(
+                catalogue,
+                detail_table,
+                force["column"],
+                force["value"],
+                force.get("via"),
+            )
+            if not condition:
+                raise PermissionError(
+                    "standalone table cannot be restricted to this vendor"
+                )
+            where.append(condition[0])
+            params.extend(condition[1])
+
+        select_parts = [
+            f"{_quote(detail_table)}.{_quote(col)} AS {_quote(col)}"
+            for col in columns
+        ]
+        sql = (
+            f"SELECT {', '.join(select_parts)} "
+            f"FROM {_quote(detail_table)}"
+        )
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " LIMIT %s"
+        params.append(limit)
+        return db.run_report_query(conn_row, sql, tuple(params))
 
     if section_type == "dataTable":
         # Use the explicitly selected relationship when provided.
@@ -1775,6 +1819,10 @@ def _report_view_related_rows_for_definition(
                 raise BadDefinition(
                     "the selected relationship is not valid for these tables"
                 )
+
+            relationship = matches[0]
+            detail_column = str(relationship["from_column"])
+            parent_column = str(relationship["to_column"])
 
         elif len(candidates) == 1:
             relationship = candidates[0]
@@ -1816,6 +1864,82 @@ def _report_view_related_rows_for_definition(
                 "the parent column must be a unique referenced key "
                 "in the configured relationship"
             )
+
+    parent_alias = parent_column.replace(".", "__")
+
+    parent_value = record.get(parent_column)
+    if parent_value is None:
+        parent_value = record.get(parent_alias)
+    if parent_value is None:
+        parent_value = record.get(f"{parent_table}__{parent_column}")
+    if parent_value is None:
+        raise ValueError("selected record has no parent key")
+
+    # Verify the selected record against the saved report and its filters.
+    verify_box = dict(box)
+    verify_box["kind"] = "table"
+    verify_box["table"] = {
+        "columns": [{"col": parent_column, "on": True}],
+        "limit": 1,
+    }
+
+    verify_sql, verify_params = build(
+        verify_box,
+        definition.get("filters"),
+        filters_state,
+        catalogue,
+        force=force,
+    )
+    if not verify_sql:
+        raise BadDefinition("cannot verify the selected report record")
+
+    verify_sql = re.sub(
+        r"\s+LIMIT\s+\d+\s*$", "", verify_sql, flags=re.IGNORECASE
+    )
+    verify_sql = (
+        "SELECT 1 FROM (" + verify_sql + ") AS `_rv_parent_check` "
+        "WHERE `_rv_parent_check`." + _quote(parent_alias) + " = %s "
+        "LIMIT 1"
+    )
+    verified = db.run_report_query(
+        conn_row, verify_sql, tuple(verify_params) + (parent_value,)
+    )
+    if not verified:
+        raise PermissionError("selected record is not in the authorized report")
+
+    # Independently enforce vendor scope on related rows.
+    where = [
+        f"{_quote(detail_table)}.{_quote(detail_column)} = %s"
+    ]
+    params = [parent_value]
+
+    if force:
+        condition = vendor_condition(
+            catalogue,
+            detail_table,
+            force["column"],
+            force["value"],
+            force.get("via"),
+        )
+        if not condition:
+            raise PermissionError(
+                "related table cannot be restricted to this vendor"
+            )
+        where.append(condition[0])
+        params.extend(condition[1])
+
+    select_parts = [
+        f"{_quote(detail_table)}.{_quote(col)} AS {_quote(col)}"
+        for col in columns
+    ]
+    sql = (
+        f"SELECT {', '.join(select_parts)} "
+        f"FROM {_quote(detail_table)} "
+        f"WHERE {' AND '.join(where)} LIMIT %s"
+    )
+    params.append(limit)
+
+    return db.run_report_query(conn_row, sql, tuple(params))
 
 
 @app.post("/api/processes/<key>/report-view-related")

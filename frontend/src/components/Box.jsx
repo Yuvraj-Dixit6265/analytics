@@ -163,11 +163,18 @@ function Body({ box }) {
   const locale = state.doc.numberFormat;
 
 React.useEffect(() => {
-  if (!selectedReportRecord || box.kind !== "reportView") return;
+  if (box.kind !== "reportView") return;
 
   const sections = (box.reportView?.popupSections || []).filter(
     (section) =>
-      section.type === "relatedTable" || section.type === "dataTable"
+      (section.type === "dataTable" && section.mode === "standalone") ||
+      (
+        !!selectedReportRecord &&
+        (
+          section.type === "relatedTable" ||
+          (section.type === "dataTable" && section.mode !== "standalone")
+        )
+      )
   );
 
   if (!sections.length) return;
@@ -194,7 +201,9 @@ React.useEffect(() => {
                 publicSlug,
                 box.id,
                 section.id,
-                selectedReportRecord,
+                section.type === "dataTable" && section.mode === "standalone"
+                  ? null
+                  : selectedReportRecord,
                 state.filterState,
                 100,
                 controller.signal
@@ -203,7 +212,9 @@ React.useEffect(() => {
                 state.processKey,
                 box.id,
                 section.id,
-                selectedReportRecord,
+                section.type === "dataTable" && section.mode === "standalone"
+                  ? null
+                  : selectedReportRecord,
                 state.filterState,
                 100,
                 controller.signal
@@ -377,6 +388,64 @@ React.useEffect(() => {
         )}
 
 
+        {(config.popupSections || [])
+          .filter(
+            (section) =>
+              section.type === "dataTable" && section.mode === "standalone"
+          )
+          .map((section, sectionIndex) => {
+            const data = relatedRows[section.id];
+            const standaloneColumns = (section.columns || []).filter(
+              (col) => col.col
+            );
+            const cellAlias = (name) => name.replace(/\\./g, "__");
+
+            return (
+              <section
+                className="report-view-popup-section"
+                key={section.id || `standalone-${sectionIndex}`}
+              >
+                <h4>{section.title || "Data Table"}</h4>
+                {data?.loading || !data ? (
+                  <p>Loading database records…</p>
+                ) : data.error ? (
+                  <p role="alert">{data.error}</p>
+                ) : !standaloneColumns.length ? (
+                  <p>No columns configured for this table.</p>
+                ) : !data.rows.length ? (
+                  <p>No records found.</p>
+                ) : (
+                  <div className="rt-table-wrap">
+                    <table className="rt">
+                      <thead>
+                        <tr>
+                          {standaloneColumns.map((col) => (
+                            <th key={col.col}>{col.label || col.col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {data.rows.map((row, rowIndex) => (
+                          <tr key={rowIndex}>
+                            {standaloneColumns.map((col) => (
+                              <td key={col.col}>
+                                {fmtCell(
+                                  row[cellAlias(col.col)] ?? row[col.col],
+                                  col.fmt || "auto",
+                                  locale
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            );
+          })}
+
         {selectedReportRecord && (
           <div
             className="report-view-overlay"
@@ -396,9 +465,17 @@ React.useEffect(() => {
                 </button>
               </div>
 
-              {(config.popupSections || []).length > 0 ? (
+              {(config.popupSections || []).some(
+                (section) =>
+                  !(section.type === "dataTable" && section.mode === "standalone")
+              ) ? (
                 <div className="report-view-popup-sections">
-                  {config.popupSections.map((section, sectionIndex) => {
+                  {config.popupSections
+                    .filter(
+                      (section) =>
+                        !(section.type === "dataTable" && section.mode === "standalone")
+                    )
+                    .map((section, sectionIndex) => {
                     const sectionColumns = (section.columns || []).filter(
                       (col) => col.col
                     );
@@ -1723,6 +1800,19 @@ function Panel({ box, cols }) {
 
     {section.type === "dataTable" && (
       <div style={{ marginTop: 10 }}>
+        <Field label="Table mode">
+          <Select
+            value={section.mode || "related"}
+            options={[
+              ["related", "Related to selected record"],
+              ["standalone", "Standalone database table"],
+            ]}
+            onChange={(v) =>
+              set(`reportView.popupSections.${index}.mode`, v)
+            }
+          />
+        </Field>
+
         <Field label="Choose database table">
           <Select
             value={section.table || ""}
@@ -1745,6 +1835,7 @@ function Panel({ box, cols }) {
           />
         </Field>
 
+        {section.mode !== "standalone" && (
         <Field label="Select relationship">
           {(() => {
             const parentTable = box?.src?.base || "";
@@ -1789,11 +1880,13 @@ function Panel({ box, cols }) {
             );
           })()}
         </Field>
+        )}
 
         <Field label="Displayed database columns">
           <Hint>
-            Choose fields from the selected table. The relationship to the
-            report record is detected from database metadata.
+            {section.mode === "standalone"
+              ? "Choose which database fields to display in this standalone table."
+              : "Choose fields from the selected table and select its relationship to the report record."}
           </Hint>
         </Field>
 

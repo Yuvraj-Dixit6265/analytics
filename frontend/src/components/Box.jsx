@@ -1735,11 +1735,59 @@ function Panel({ box, cols }) {
                 })
                 .filter(Boolean),
             ]}
+            
             onChange={(v) => {
               set(`reportView.popupSections.${index}.table`, v);
               set(`reportView.popupSections.${index}.columns`, []);
+              set(`reportView.popupSections.${index}.relationship`, null);
             }}
+
           />
+        </Field>
+
+        <Field label="Select relationship">
+          {(() => {
+            const parentTable = box?.src?.base || "";
+
+            const options = (state.catalog?.relationships || []).filter(
+              (r) =>
+                r.from_table === section.table &&
+                r.to_table === parentTable &&
+                r.to_unique
+            );
+
+            return (
+              <Select
+                value={
+                  section.relationship
+                    ? `${section.relationship.fromColumn}|${section.relationship.toColumn}`
+                    : ""
+                }
+                options={[
+                  ["", options.length ? "Select relationship" : "No valid relationships found"],
+                  ...options.map((r) => [
+                    `${r.from_column}|${r.to_column}`,
+                    `${r.from_column} → ${r.to_table}.${r.to_column} (${r.source})`,
+                  ]),
+                ]}
+                onChange={(v) => {
+                  const selected = options.find(
+                    (r) => `${r.from_column}|${r.to_column}` === v
+                  );
+
+                  set(
+                    `reportView.popupSections.${index}.relationship`,
+                    selected
+                      ? {
+                          fromColumn: selected.from_column,
+                          toColumn: selected.to_column,
+                        }
+                      : null
+                  );
+                }}
+              />
+            );
+          })()}
         </Field>
 
         <Field label="Displayed database columns">

@@ -285,8 +285,19 @@ function Shell() {
   const reloadCatalog = React.useCallback(async () => {
     try {
       const r = await api.catalog(state.connectionId);
-      dispatch({ type: "catalog", catalog: { tables: r.tables || [] } });
-    } catch { dispatch({ type: "catalog", catalog: { tables: [] } }); }
+      
+      dispatch({
+        type: "catalog",
+        catalog: {
+          tables: r.tables || [],
+          relationships: r.relationships || [],
+        },
+      });
+
+    } catch { dispatch({
+                        type: "catalog",
+                        catalog: { tables: [], relationships: [] },
+                      }); }
   }, [dispatch, state.connectionId]);
 
   React.useEffect(() => {

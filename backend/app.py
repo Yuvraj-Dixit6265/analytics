@@ -1747,23 +1747,52 @@ def _report_view_related_rows_for_definition(
         raise BadDefinition("invalid related-table field")
 
     if section_type == "dataTable":
-        # Infer the relationship from database metadata. Only accept one
-        # unambiguous child-to-parent relationship to a unique parent key.
+        # Use the explicitly selected relationship when provided.
+        # Otherwise, infer it only when there is exactly one valid option.
         candidates = [
             r for r in relationships
             if r["from_table"] == detail_table
             and r["to_table"] == parent_table
             and bool(r.get("to_unique"))
         ]
-        if len(candidates) != 1:
+
+        selected = section.get("relationship")
+
+        if selected is not None:
+            if not isinstance(selected, dict):
+                raise BadDefinition("invalid selected relationship")
+
+            detail_column = str(selected.get("fromColumn") or "")
+            parent_column = str(selected.get("toColumn") or "")
+
+            matches = [
+                r for r in candidates
+                if r["from_column"] == detail_column
+                and r["to_column"] == parent_column
+            ]
+
+            if len(matches) != 1:
+                raise BadDefinition(
+                    "the selected relationship is not valid for these tables"
+                )
+
+        elif len(candidates) == 1:
+            relationship = candidates[0]
+            detail_column = str(relationship["from_column"])
+            parent_column = str(relationship["to_column"])
+
+        elif len(candidates) == 0:
             raise BadDefinition(
-                "could not infer one unambiguous relationship between "
-                "the selected table and report table; use Related Table "
-                "(Legacy) to configure the keys explicitly"
+                "no valid relationship found between the selected table "
+                "and report table"
             )
-        relationship = candidates[0]
-        detail_column = str(relationship["from_column"])
-        parent_column = str(relationship["to_column"])
+
+        else:
+            raise BadDefinition(
+                "multiple relationships found; select one in the Data Table "
+                "configuration and save the report"
+            )
+
     else:
         parent_column = str(section.get("parentColumn") or "")
         detail_column = str(section.get("relatedColumn") or "")
@@ -1787,85 +1816,6 @@ def _report_view_related_rows_for_definition(
                 "the parent column must be a unique referenced key "
                 "in the configured relationship"
             )
-
-    parent_alias = parent_column.replace(".", "__")
-
-    parent_value = record.get(parent_column)
-    if parent_value is None:
-        parent_value = record.get(parent_alias)
-    if parent_value is None:
-        parent_value = record.get(f"{parent_table}__{parent_column}")
-    if parent_value is None:
-        raise ValueError("selected record has no parent key")
-
-    # Verify the parent against the saved report query and its active filters.
-    # The browser-supplied record is used only to identify the candidate value.
-    verify_box = dict(box)
-    verify_box["kind"] = "table"
-    verify_box["table"] = {
-        "columns": [{"col": parent_column, "on": True}],
-        "limit": 1,
-    }
-
-    verify_sql, verify_params = build(
-        verify_box,
-        definition.get("filters"),
-        filters_state,
-        catalogue,
-        force=force,
-    )
-    if not verify_sql:
-        raise BadDefinition("cannot verify the selected report record")
-
-    # Remove the synthetic table's LIMIT so the outer predicate can locate
-    # the candidate even when it is not the first row.
-    verify_sql = re.sub(
-        r"\s+LIMIT\s+\d+\s*$", "", verify_sql, flags=re.IGNORECASE
-    )
-    verify_sql = (
-        "SELECT 1 FROM (" + verify_sql + ") AS `_rv_parent_check` "
-        "WHERE `_rv_parent_check`." + _quote(parent_alias) + " = %s "
-        "LIMIT 1"
-    )
-    verified = db.run_report_query(
-        conn_row, verify_sql, tuple(verify_params) + (parent_value,)
-    )
-    if not verified:
-        raise PermissionError("selected record is not in the authorized report")
-
-    # Independently scope the related table for vendor publications.
-    where = [
-        f"{_quote(detail_table)}.{_quote(detail_column)} = %s"
-    ]
-    params = [parent_value]
-
-    if force:
-        condition = vendor_condition(
-            catalogue,
-            detail_table,
-            force["column"],
-            force["value"],
-            force.get("via"),
-        )
-        if not condition:
-            raise PermissionError(
-                "related table cannot be restricted to this vendor"
-            )
-        where.append(condition[0])
-        params.extend(condition[1])
-
-    select_parts = [
-        f"{_quote(detail_table)}.{_quote(col)} AS {_quote(col)}"
-        for col in columns
-    ]
-    sql = (
-        f"SELECT {', '.join(select_parts)} "
-        f"FROM {_quote(detail_table)} "
-        f"WHERE {' AND '.join(where)} LIMIT %s"
-    )
-    params.append(limit)
-
-    return db.run_report_query(conn_row, sql, tuple(params))
 
 
 @app.post("/api/processes/<key>/report-view-related")

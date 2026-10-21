@@ -1653,142 +1653,26 @@ function Panel({ box, cols }) {
       />
     </Field>
 
-    {section.type === "manualTable" && (() => {
-      const table = section.manualTable || {
-        columns: [],
-        rows: [],
-        zebra: true,
-      };
-      const tableColumns = table.columns || [];
-      const tableRows = table.rows || [];
-      const base = `reportView.popupSections.${index}.manualTable`;
-
-      const updateTable = (key, value) => set(`${base}.${key}`, value);
-
-      return (
-        <>
-          <Group>Table columns</Group>
-          {tableColumns.map((col, colIndex) => (
-            <Row key={col.id || colIndex}>
-              <Text
-                value={col.label || ""}
-                placeholder={`Column ${colIndex + 1}`}
-                onChange={(value) =>
-                  set(`${base}.columns.${colIndex}.label`, value)
-                }
-              />
-              <button
-                type="button"
-                className="xbtn"
-                title="Remove column"
-                onClick={() => {
-                  updateTable(
-                    "columns",
-                    tableColumns.filter((_, i) => i !== colIndex)
-                  );
-                  updateTable(
-                    "rows",
-                    tableRows.map((row) => ({
-                      ...row,
-                      cells: (row.cells || []).filter((_, i) => i !== colIndex),
-                    }))
-                  );
-                }}
-              >
-                ×
-              </button>
-            </Row>
-          ))}
-
-          <button
-            type="button"
-            className="pb"
-            onClick={() => {
-              updateTable("columns", [
-                ...tableColumns,
-                {
-                  id: `col-${Date.now()}`,
-                  label: `Column ${tableColumns.length + 1}`,
-                },
-              ]);
-              updateTable(
-                "rows",
-                tableRows.map((row) => ({
-                  ...row,
-                  cells: [...(row.cells || []), ""],
-                }))
-              );
-            }}
-          >
-            + Add column
-          </button>
-
-          <Group>Table rows</Group>
-          <div className="rt-table-wrap">
-            <table className="rt manual-table">
-              <thead>
-                <tr>
-                  {tableColumns.map((col, i) => (
-                    <th key={col.id || i}>{col.label || `Column ${i + 1}`}</th>
-                  ))}
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tableRows.map((row, rowIndex) => (
-                  <tr key={row.id || rowIndex}>
-                    {tableColumns.map((col, colIndex) => (
-                      <td key={col.id || colIndex}>
-                        <Text
-                          value={row.cells?.[colIndex] ?? ""}
-                          onChange={(value) =>
-                            set(
-                              `${base}.rows.${rowIndex}.cells.${colIndex}`,
-                              value
-                            )
-                          }
-                        />
-                      </td>
-                    ))}
-                    <td>
-                      <button
-                        type="button"
-                        className="xbtn"
-                        title="Remove row"
-                        onClick={() =>
-                          updateTable(
-                            "rows",
-                            tableRows.filter((_, i) => i !== rowIndex)
-                          )
-                        }
-                      >
-                        ×
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <button
-            type="button"
-            className="pb"
-            onClick={() =>
-              updateTable("rows", [
-                ...tableRows,
-                {
-                  id: `row-${Date.now()}`,
-                  cells: tableColumns.map(() => ""),
-                },
-              ])
-            }
-          >
-            + Add row
-          </button>
-        </>
-      );
-    })()}
+    {section.type === "manualTable" && (
+      <ManualTableData
+        box={{
+          manualTable: section.manualTable || {
+            columns: [
+              { id: "popup-item", label: "Item" },
+              { id: "popup-quantity", label: "Quantity" },
+              { id: "popup-amount", label: "Amount" },
+            ],
+            rows: [
+              { id: "popup-row-1", cells: ["", "", ""] },
+            ],
+            zebra: true,
+          },
+        }}
+        set={(path, value) =>
+          set(`reportView.popupSections.${index}.${path}`, value)
+        }
+      />
+    )}
 
     {section.type === "relatedTable" && (
       <>

@@ -430,7 +430,7 @@ React.useEffect(() => {
                             {standaloneColumns.map((col) => (
                               <td key={col.col}>
                                 {fmtCell(
-                                  row[cellAlias(col.col)] ?? row[col.col],
+                                  row[cellAlias(col.key || col.col)] ?? row[col.key || col.col],
                                   col.fmt || "auto",
                                   locale
                                 )}
@@ -567,7 +567,7 @@ React.useEffect(() => {
                 {relatedColumns.map((col) => (
                   <td key={col.col}>
                     {fmtCell(
-                      row[cellAlias(col.col)] ?? row[col.col],
+                      row[cellAlias(col.key || col.col)] ?? row[col.key || col.col],
                       col.fmt || "auto",
                       locale
                     )}
@@ -1573,7 +1573,7 @@ function Panel({ box, cols }) {
                         value={col.col || ""}
                         options={[
                           ["", "Select column"],
-                          ...columnOptions,,
+                          ...columnOptions,
                         ]}
                         onChange={(v) => {
                           set(`${path}.${i}.col`, v);
@@ -1887,39 +1887,136 @@ function Panel({ box, cols }) {
           </Hint>
         </Field>
 
-        {(() => {
-          const tableEntry = (state.catalog?.tables || []).find(
-            (t) =>
-              (typeof t === "string" ? t : t.name) === section.table
-          );
-          const tableColumns = (tableEntry?.columns || []).map((c) =>
-            typeof c === "string" ? c : c.name
-          ).filter(Boolean);
-          const columnSearch = popupColumnSearch[section.id || index] || "";
-          const filteredTableColumns = tableColumns.filter((name) =>
-            name.toLowerCase().includes(columnSearch.trim().toLowerCase())
-          );
+        <Field label="Column source">
+          <Select
+            value={section.columnSource || "table"}
+            options={[
+              ["table", "Selected table only"],
+              ["database", "Entire database"],
+            ]}
+            onChange={(value) =>
+              set(`reportView.popupSections.${index}.columnSource`, value)
+            }
+          />
+        </Field>
 
+        {(() => {
+          const catalogTables = (state.catalog?.tables || [])
+            .map((item) => typeof item === "string"
+              ? { name: item, columns: [] }
+              : item)
+            .filter((item) => item?.name);
+          const getColumns = (tableName) => {
+            const entry = catalogTables.find((item) => item.name === tableName);
+            return (entry?.columns || [])
+              .map((column) => typeof column === "string"
+                ? column
+                : column.name)
+              .filter(Boolean);
+          };
+          const search = popupColumnSearch[section.id || index] || "";
+          const sourceMode = section.columnSource || "table";
+
+          if (sourceMode === "table") {
+            const filtered = getColumns(section.table).filter((name) =>
+              name.toLowerCase().includes(search.trim().toLowerCase())
+            );
+            return (
+              <>
+                <Field label="Search columns">
+                  <Text
+                    value={search}
+                    placeholder="Search selected table columns…"
+                    onChange={(value) =>
+                      setPopupColumnSearch((current) => ({
+                        ...current,
+                        [section.id || index]: value,
+                      }))
+                    }
+                  />
+                </Field>
+                {renderColumnEditor(
+                  section.columns || [],
+                  `reportView.popupSections.${index}.columns`,
+                  filtered
+                )}
+              </>
+            );
+          }
+
+          const columnPath = `reportView.popupSections.${index}.columns`;
           return (
-            <>
-              <Field label="Search database columns">
-                <Text
-                  value={columnSearch}
-                  placeholder="Search columns…"
-                  onChange={(value) =>
-                    setPopupColumnSearch((current) => ({
-                      ...current,
-                      [section.id || index]: value,
-                    }))
-                  }
-                />
-              </Field>
-              {renderColumnEditor(
-                section.columns || [],
-                `reportView.popupSections.${index}.columns`,
-                filteredTableColumns
-              )}
-            </>
+            <div className="collist">
+              {(section.columns || []).map((col, columnIndex) => {
+                const sourceTable = col.table || section.table || "";
+                const filtered = getColumns(sourceTable).filter((name) =>
+                  name.toLowerCase().includes(search.trim().toLowerCase())
+                );
+                const rowPath = `${columnPath}.${columnIndex}`;
+                return (
+                  <div className="colrow" key={rowPath}>
+                    <Field label="Source table">
+                      <Select
+                        value={sourceTable}
+                        options={[
+                          ["", "Select source table"],
+                          ...catalogTables.map((table) => [
+                            table.name,
+                            table.name,
+                          ]),
+                        ]}
+                        onChange={(value) => {
+                          set(`${rowPath}.table`, value);
+                          set(`${rowPath}.col`, "");
+                          set(`${rowPath}.key`, "");
+                        }}
+                      />
+                    </Field>
+                    <Field label="Database column">
+                      <Select
+                        value={col.col || ""}
+                        options={[
+                          ["", "Select column"],
+                          ...filtered.map((name) => [name, name]),
+                        ]}
+                        onChange={(value) => {
+                          set(`${rowPath}.col`, value);
+                          set(
+                            `${rowPath}.key`,
+                            value ? `${sourceTable}.${value}` : ""
+                          );
+                          if (value && !col.label) {
+                            set(`${rowPath}.label`, value);
+                          }
+                        }}
+                      />
+                    </Field>
+                    <Field label="Display heading">
+                      <Text
+                        value={col.label || ""}
+                        placeholder="Heading"
+                        onChange={(value) => set(`${rowPath}.label`, value)}
+                      />
+                    </Field>
+                    <button
+                      type="button"
+                      className="xbtn"
+                      title="Remove column"
+                      onClick={() =>
+                        set(
+                          columnPath,
+                          (section.columns || []).filter(
+                            (_, itemIndex) => itemIndex !== columnIndex
+                          )
+                        )
+                      }
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           );
         })()}
 
@@ -1929,7 +2026,13 @@ function Panel({ box, cols }) {
           onClick={() =>
             set(`reportView.popupSections.${index}.columns`, [
               ...(section.columns || []),
-              { col: "", label: "", fmt: "auto" },
+              {
+                col: "",
+                table: section.table || "",
+                key: "",
+                label: "",
+                fmt: "auto",
+              },
             ])
           }
         >

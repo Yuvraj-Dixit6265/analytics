@@ -1734,11 +1734,11 @@ def _report_view_related_rows_for_definition(
 
     parent_table = str((box.get("src") or {}).get("base") or "")
     detail_table = str(section.get("table") or "")
-    columns = [
-        str(c.get("col") or "")
-        for c in section.get("columns") or []
+    column_configs = [
+        c for c in (section.get("columns") or [])
         if isinstance(c, dict) and c.get("col")
     ]
+    columns = [str(c["col"]) for c in column_configs]
 
     if not detail_table or not columns:
         raise ValueError("data table section is incomplete")
@@ -1753,11 +1753,68 @@ def _report_view_related_rows_for_definition(
         raise BadDefinition("invalid configured table")
     if not standalone and parent_table not in catalogue:
         raise BadDefinition("invalid report table")
-    if any(c not in catalogue[detail_table] for c in columns):
-        raise BadDefinition("invalid data-table field")
+    for config in column_configs:
+        source_table = str(config.get("table") or detail_table)
+        column = str(config.get("col") or "")
+
+        if source_table not in catalogue:
+            raise BadDefinition("invalid data-table source table")
+        if column not in catalogue[source_table]:
+            raise BadDefinition("invalid data-table field")
+
+    # Resolve requested source tables using only many-to-one relationships.
+    # This keeps the line-item table as the base and prevents row multiplication.
+    def _rv_path_to(target):
+        if target == detail_table:
+            return []
+        queue = [(detail_table, [])]
+        visited = {detail_table}
+        while queue:
+            current, path = queue.pop(0)
+            for rel in relationships:
+                if rel.get("from_table") != current or not rel.get("to_unique"):
+                    continue
+                nxt = rel.get("to_table")
+                if not nxt or nxt in visited:
+                    continue
+                next_path = path + [rel]
+                if nxt == target:
+                    return next_path
+                visited.add(nxt)
+                queue.append((nxt, next_path))
+        raise BadDefinition(
+            f"no safe many-to-one relationship path from {detail_table} to {target}"
+        )
+
+    joined_tables = {detail_table}
+    join_parts = []
+    for config in column_configs:
+        source_table = str(config.get("table") or detail_table)
+        for rel in _rv_path_to(source_table):
+            target = rel["to_table"]
+            if target in joined_tables:
+                continue
+            origin = rel["from_table"]
+            if origin not in joined_tables:
+                raise BadDefinition("invalid database join path")
+            join_parts.append(
+                f" JOIN {_quote(target)} ON "
+                f"{_quote(origin)}.{_quote(rel['from_column'])} = "
+                f"{_quote(target)}.{_quote(rel['to_column'])}"
+            )
+            joined_tables.add(target)
+    join_sql = "".join(join_parts)
+
+    select_parts = []
+    for config in column_configs:
+        source_table = str(config.get("table") or detail_table)
+        column = str(config.get("col") or "")
+        output_key = str(config.get("key") or column)
+        select_parts.append(
+            f"{_quote(source_table)}.{_quote(column)} AS {_quote(output_key)}"
+        )
 
     if standalone:
-        from querybuilder import vendor_condition
 
         where = []
         params = []
@@ -1776,13 +1833,9 @@ def _report_view_related_rows_for_definition(
             where.append(condition[0])
             params.extend(condition[1])
 
-        select_parts = [
-            f"{_quote(detail_table)}.{_quote(col)} AS {_quote(col)}"
-            for col in columns
-        ]
         sql = (
             f"SELECT {', '.join(select_parts)} "
-            f"FROM {_quote(detail_table)}"
+            f"FROM {_quote(detail_table)}{join_sql}"
         )
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -1928,13 +1981,9 @@ def _report_view_related_rows_for_definition(
         where.append(condition[0])
         params.extend(condition[1])
 
-    select_parts = [
-        f"{_quote(detail_table)}.{_quote(col)} AS {_quote(col)}"
-        for col in columns
-    ]
     sql = (
         f"SELECT {', '.join(select_parts)} "
-        f"FROM {_quote(detail_table)} "
+        f"FROM {_quote(detail_table)}{join_sql} "
         f"WHERE {' AND '.join(where)} LIMIT %s"
     )
     params.append(limit)

@@ -1431,7 +1431,7 @@ React.useEffect(() => {
                     className="pb"
                     onClick={() => addPopupSection("lineItems")}
                   >
-                    + Add Box
+                    + Add Line Items
                   </button>
                   <button
                     type="button"

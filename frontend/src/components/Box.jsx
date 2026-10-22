@@ -981,7 +981,13 @@ React.useEffect(() => {
 
             return (
               <section
-                className="report-view-popup-section"
+                className={`report-view-popup-section ${
+                  ["lineItems", "dataTable", "relatedTable", "manualTable"].includes(
+                    section.type
+                  )
+                    ? "report-view-popup-section-line-items"
+                    : ""
+                }`}
                 key={section.id || `standalone-${sectionIndex}`}
               >
                 <h4>{section.title || "Data Table"}</h4>

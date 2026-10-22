@@ -564,9 +564,13 @@ table.rt {
 }
 
 .report-view-popup-sections {
-  display: flex;
-  flex-direction: column;
-  gap: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.report-view-popup-section-line-items {
+  grid-column: 1 / -1;
 }
 
 .report-view-popup-section {

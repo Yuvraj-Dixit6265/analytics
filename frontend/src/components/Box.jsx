@@ -1875,6 +1875,75 @@ if (box.tableMode === "graph") {
   const [msg, sub] = stateNote(box, state.catalog);
   const alias = (ref) => ref.replace(/\./g, "__");
 
+  /* The clicked row's details open in a popup (turn off in Row Detail List). */
+  const detail = c.detail || {};
+  const popupMode = detail.popup !== false;
+  const closeDetail = () => {
+    setDetailItems(null);
+    setDetailValue("");
+  };
+
+  const detailBody = (
+    <>
+                  {detailLoading ? (
+                    <div className="pr-empty">
+                      Loading details...
+                    </div>
+                  ) : detailItems.length === 0 ? (
+                    <div className="pr-empty">
+                      No detail records found.
+                    </div>
+                  ) : (
+                    <div className="pr-items-table-wrap">
+                      <table className="rt pr-items-table">
+                        <thead>
+                          <tr>
+                            {(detail.columns || [])
+                              .filter((col) => col.col)
+                              .map((col) => (
+                                <th key={col.col}>
+                                  {col.label || col.col}
+                                </th>
+                              ))}
+                          </tr>
+                        </thead>
+
+                        <tbody>
+                          {detailItems.map((item, itemIndex) => (
+                            <tr key={itemIndex}>
+                              {(detail.columns || [])
+                                .filter((col) => col.col)
+                                .map((col) => {
+                                  const value =
+                                    item[alias(col.col)] ??
+                                    item[col.col];
+
+                                  return (
+                                    <td
+                                      key={col.col}
+                                      className={
+                                        col.align === "right"
+                                          ? "num"
+                                          : undefined
+                                      }
+                                    >
+                                      {fmtCell(
+                                        value,
+                                        col.fmt,
+                                        locale
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+    </>
+  );
+
     return (
     <div className="rt-table-wrap">
       <table className="rt">
@@ -2102,7 +2171,7 @@ if (box.tableMode === "graph") {
             })}
           </tr>
 
-          {isSelected && (
+          {isSelected && !popupMode && (
             <tr className="pr-items-row">
               <td colSpan={shown.length}>
                 <div className="pr-inline">
@@ -2122,62 +2191,7 @@ if (box.tableMode === "graph") {
                     </button>
                   </div>
 
-                  {detailLoading ? (
-                    <div className="pr-empty">
-                      Loading details...
-                    </div>
-                  ) : detailItems.length === 0 ? (
-                    <div className="pr-empty">
-                      No detail records found.
-                    </div>
-                  ) : (
-                    <div className="pr-items-table-wrap">
-                      <table className="rt pr-items-table">
-                        <thead>
-                          <tr>
-                            {(detail.columns || [])
-                              .filter((col) => col.col)
-                              .map((col) => (
-                                <th key={col.col}>
-                                  {col.label || col.col}
-                                </th>
-                              ))}
-                          </tr>
-                        </thead>
-
-                        <tbody>
-                          {detailItems.map((item, itemIndex) => (
-                            <tr key={itemIndex}>
-                              {(detail.columns || [])
-                                .filter((col) => col.col)
-                                .map((col) => {
-                                  const value =
-                                    item[alias(col.col)] ??
-                                    item[col.col];
-
-                                  return (
-                                    <td
-                                      key={col.col}
-                                      className={
-                                        col.align === "right"
-                                          ? "num"
-                                          : undefined
-                                      }
-                                    >
-                                      {fmtCell(
-                                        value,
-                                        col.fmt,
-                                        locale
-                                      )}
-                                    </td>
-                                  );
-                                })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  {detailBody}
                 </div>
               </td>
             </tr>
@@ -2252,6 +2266,33 @@ if (box.tableMode === "graph") {
       )}
 
     </table>
+
+      {popupMode && detailItems !== null && detailValue !== "" && (
+        <div
+          className="report-view-overlay"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) closeDetail();
+          }}
+        >
+          <div className="report-view-modal" role="dialog" aria-modal="true">
+            <div className="report-view-modal-header">
+              <h3>
+                {detail.title || "Details"} — {detailValue}
+              </h3>
+              <button
+                type="button"
+                className="xbtn"
+                onClick={closeDetail}
+                aria-label="Close details"
+              >
+                ×
+              </button>
+            </div>
+
+            {detailBody}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4121,8 +4162,11 @@ const addAllColumns = () => {
 
       {c.detail?.enabled && (
         <>
-        <Row>
-</Row>
+        <Switch
+          on={c.detail.popup !== false}
+          label="Open details in a popup"
+          onChange={(v) => set("table.detail.popup", v)}
+        />
 <Row>
   <Field label="Clickable column">
     <Select

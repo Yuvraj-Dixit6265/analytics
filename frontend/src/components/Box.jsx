@@ -1883,7 +1883,7 @@ if (box.tableMode === "graph") {
     setDetailValue("");
   };
 
-  const detailBody = (
+  const detailBody = detailItems === null ? null : (
     <>
                   {detailLoading ? (
                     <div className="pr-empty">

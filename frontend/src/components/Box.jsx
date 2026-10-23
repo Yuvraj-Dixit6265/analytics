@@ -14,102 +14,6 @@ import {
   Check, Chips, ConfirmBar, DeleteButton, Field, FormatPanel, FrameControls,
   Group, Hint, Row, RoleChips, SegBar, Select, SourceEditor, Switch, Text, TextArea, Toggles,
 } from "./Panels.jsx";
-
-function TablePagination({
-  totalRows,
-  page,
-  pageSize,
-  onPageChange,
-  onPageSizeChange,
-}) {
-  const totalPages =
-    pageSize === "all"
-      ? 1
-      : Math.max(1, Math.ceil(totalRows / pageSize));
-
-  if (totalRows === 0) return null;
-
-  const start =
-    pageSize === "all" ? 1 : (page - 1) * pageSize + 1;
-
-  const end =
-    pageSize === "all"
-      ? totalRows
-      : Math.min(page * pageSize, totalRows);
-
-  const visiblePages = Array.from(
-    { length: totalPages },
-    (_, index) => index + 1
-  ).filter(
-    (number) =>
-      totalPages <= 7 ||
-      number === 1 ||
-      number === totalPages ||
-      Math.abs(number - page) <= 1
-  );
-
-  return (
-    <div className="table-pagination">
-      <span className="table-pagination-count">
-        Showing {start}–{end} of {totalRows} records
-      </span>
-
-      <label className="table-pagination-size">
-        Rows:
-        <select
-          value={pageSize}
-          onChange={(event) => {
-            const value =
-              event.target.value === "all"
-                ? "all"
-                : Number(event.target.value);
-
-            onPageSizeChange(value);
-            onPageChange(1);
-          }}
-        >
-          <option value={10}>10</option>
-          <option value={25}>25</option>
-          <option value={50}>50</option>
-          <option value={100}>100</option>
-          <option value="all">All</option>
-        </select>
-      </label>
-
-      <button
-        type="button"
-        disabled={page <= 1}
-        onClick={() => onPageChange(page - 1)}
-      >
-        Previous
-      </button>
-
-      {visiblePages.map((number, index) => (
-        <React.Fragment key={number}>
-          {index > 0 &&
-            number - visiblePages[index - 1] > 1 && <span>…</span>}
-
-          <button
-            type="button"
-            className={number === page ? "active" : ""}
-            aria-current={number === page ? "page" : undefined}
-            onClick={() => onPageChange(number)}
-          >
-            {number}
-          </button>
-        </React.Fragment>
-      ))}
-
-      <button
-        type="button"
-        disabled={page >= totalPages}
-        onClick={() => onPageChange(page + 1)}
-      >
-        Next
-      </button>
-    </div>
-  );
-}
 /* An editable line that writes on blur, so typing never re-renders the tree. */
 function Editable({
   value,
@@ -2613,20 +2517,6 @@ if (box.tableMode === "graph") {
     );
 
   const rows = result?.rows || [];
-  const totalPages =
-  tablePageSize === "all"
-    ? 1
-    : Math.max(1, Math.ceil(rows.length / tablePageSize));
-
-const safePage = Math.min(tablePage, totalPages);
-
-const pageRows =
-  tablePageSize === "all"
-    ? rows
-    : rows.slice(
-        (safePage - 1) * tablePageSize,
-        safePage * tablePageSize
-      );
   const [msg, sub] = stateNote(box, state.catalog);
   const alias = (ref) => ref.replace(/\./g, "__");
 
@@ -2826,7 +2716,7 @@ const pageRows =
 
       <tbody>
   {rows.length ? (
-    pageRows.map((r, i) => {
+    rows.slice(0, c.limit || 10).map((r, i) => {
       const detail = c.detail || {};
       console.log("DETAIL USED:", {
         baseTable: box?.src?.base || "",
@@ -3051,13 +2941,6 @@ const pageRows =
       )}
 
     </table>
-    <TablePagination
-  totalRows={rows.length}
-  page={safePage}
-  pageSize={tablePageSize}
-  onPageChange={setTablePage}
-  onPageSizeChange={setTablePageSize}
-/>
 
       {popupMode && detailItems !== null && detailValue !== "" && (
         <div
@@ -4708,8 +4591,6 @@ function GraphTableData({ box, set }) {
 /* ---- table ---- */
 function TableData({ box, set }) {
   const { state, dispatch } = useStore();
-  const [tablePage, setTablePage] = React.useState(1);
-  const [tablePageSize, setTablePageSize] = React.useState(10);
   const c = box.table || {};
   React.useEffect(() => {
   const details = c.detail?.columns || [];

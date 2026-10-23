@@ -247,6 +247,7 @@ function DetailPopup({
   sectionRows,
   detailValue,
   record,
+  matchOptions = [],
   design,
   locale,
   catalog,
@@ -606,6 +607,11 @@ function DetailPopup({
                 <span style={{ fontSize: 11, opacity: 0.6 }}>
                   {DETAIL_TYPE_LABEL[sec.type] || sec.type}
                 </span>
+                <Select
+                  value={sec.keyColumn || ""}
+                  options={[["", "Match: same as list"], ...matchOptions]}
+                  onChange={(v) => patch(i, { keyColumn: v })}
+                />
                 {!isHeader && (
                   <Select
                     value={sec.span || 12}
@@ -635,6 +641,14 @@ function DetailPopup({
 
             {design && renderEditor(sec, i)}
             {renderBody(sec)}
+            {design && sectionRows[sec.id]?.failed?.length > 0 && (
+              <div style={{ fontSize: 12, color: "#B3261E", marginTop: 8 }}>
+                Couldn't load: {sectionRows[sec.id].failed.join(", ")}
+                {sectionRows[sec.id].failedMsg
+                  ? ` — ${sectionRows[sec.id].failedMsg}`
+                  : ""}
+              </div>
+            )}
           </div>
         );
       })}
@@ -762,33 +776,82 @@ function Body({ box }) {
       return next;
     });
 
+    /* Each box can look up by its own column (e.g. vendor code for vendor
+       info); by default it uses the column the list is clickable on. */
+    const lookupFor = (sec) => {
+      const key = sec.keyColumn || tableDetail.keyColumn;
+      if (!sec.keyColumn || sec.keyColumn === tableDetail.keyColumn) {
+        return { key, value: detailValue };
+      }
+      const rec = detailRow || {};
+      const raw = rec[String(key).replace(/\./g, "__")] ?? rec[key];
+      return { key, value: raw === undefined || raw === null ? "" : String(raw) };
+    };
+
     todo.forEach(async (sec) => {
-      try {
-        const data = await fetchDetailRows({
+      const { key, value } = lookupFor(sec);
+      const cols = (sec.columns || []).map((c) => c.col).filter(Boolean);
+      const limit = sec.type === "lineItems" ? tableDetail.limit || 100 : 5;
+      const fetchWith = (columns, lim) =>
+        fetchDetailRows({
           box,
           processKey: state.processKey,
-          keyColumn: tableDetail.keyColumn,
-          value: detailValue,
-          columns: (sec.columns || []).map((c) => c.col).filter(Boolean),
-          limit: sec.type === "lineItems" ? tableDetail.limit || 100 : 5,
+          keyColumn: key,
+          value,
+          columns,
+          limit: lim,
           signal: controller.signal,
         });
+      const done = (payload) => {
         if (cancelled) return;
-        setSectionRows((prev) => ({
-          ...prev,
-          [sec.id]: { loading: false, rows: data.rows || [], error: "", value: detailValue },
-        }));
-      } catch (err) {
-        if (cancelled || err.name === "AbortError") return;
         setSectionRows((prev) => ({
           ...prev,
           [sec.id]: {
             loading: false,
             rows: [],
-            error: err.message || "Could not load this box.",
+            error: "",
+            failed: [],
+            failedMsg: "",
+            ...payload,
             value: detailValue,
           },
         }));
+      };
+
+      if (!value) {
+        done({ error: `This record has no value for "${key}".` });
+        return;
+      }
+
+      try {
+        const data = await fetchWith(cols, limit);
+        done({ rows: data.rows || [] });
+      } catch (err) {
+        if (cancelled || err.name === "AbortError") return;
+        if (sec.type === "lineItems" || cols.length < 2) {
+          done({ error: err.message || "Could not load this box." });
+          return;
+        }
+        /* One bad column (for example a table with a different collation)
+           shouldn't blank the whole box: load the columns one by one. */
+        const results = await Promise.allSettled(cols.map((col) => fetchWith([col], 5)));
+        if (cancelled) return;
+        const merged = {};
+        const failed = [];
+        let failedMsg = "";
+        results.forEach((r, idx) => {
+          if (r.status === "fulfilled") Object.assign(merged, r.value?.rows?.[0] || {});
+          else {
+            failed.push(cols[idx]);
+            if (!failedMsg) failedMsg = r.reason?.message || "";
+          }
+        });
+        done({
+          rows: Object.keys(merged).length ? [merged] : [],
+          error: failed.length === cols.length ? err.message : "",
+          failed,
+          failedMsg,
+        });
       }
     });
 
@@ -805,6 +868,7 @@ function Body({ box }) {
       tableDetailSections.map((sec) => [
         sec.id,
         sec.type,
+        sec.keyColumn || "",
         (sec.columns || []).map((c) => c.col),
       ])
     ),
@@ -2902,6 +2966,9 @@ if (box.tableMode === "graph") {
                 sectionRows={sectionRows}
                 detailValue={detailValue}
                 record={detailRow}
+                matchOptions={(c.columns || [])
+                  .filter((x) => x.col)
+                  .map((x) => [x.col, x.label || x.col])}
                 design={isDesign}
                 locale={locale}
                 catalog={state.catalog}

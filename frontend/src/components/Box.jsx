@@ -148,6 +148,406 @@ const Placeholder = ({ msg, sub, height }) => (
   </div>
 );
 
+/* ---- record popup (header, detail boxes, line items) ---- */
+async function fetchDetailRows({ box, processKey, keyColumn, value, columns, limit, signal }) {
+  if (window.location.pathname.includes("/r/")) {
+    const [, publicPath] = window.location.pathname.split("/r/");
+    const [publicKey, publicToken] = publicPath.split("/");
+    const params = new URLSearchParams({
+      parentTable: box?.src?.base || "",
+      lookupColumn: keyColumn,
+      value,
+      detailColumns: columns.join(","),
+      limit: String(limit),
+    });
+    const vt = new URLSearchParams(window.location.search).get("vt");
+    if (vt) params.set("vt", vt);
+    const res = await fetch(
+      `/api/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`,
+      { signal }
+    );
+    if (!res.ok) throw new Error("Could not load details");
+    return await res.json();
+  }
+  return api.getDetailRows(
+    processKey,
+    box?.src?.base || "",
+    keyColumn,
+    value,
+    columns,
+    limit
+  );
+}
+
+const newDetailSection = (type = "fields") => ({
+  id: uid("sec"),
+  type,
+  title:
+    type === "lineItems" ? "Line Items" : type === "header" ? "Header" : "New Section",
+  columns: [],
+});
+
+const DETAIL_TYPE_LABEL = {
+  header: "Header",
+  fields: "Details",
+  lineItems: "Line items",
+};
+
+const popupCard = {
+  border: "1px solid #E3E8EA",
+  background: "#F7F8FA",
+  borderRadius: 8,
+  padding: "16px 20px",
+  marginBottom: 16,
+};
+const popupSectionTitle = {
+  fontSize: 12,
+  fontWeight: 700,
+  letterSpacing: ".06em",
+  textTransform: "uppercase",
+  color: "#5B6B70",
+  marginBottom: 12,
+};
+const popupLabel = {
+  fontSize: 11,
+  letterSpacing: ".05em",
+  textTransform: "uppercase",
+  color: "#5B6B70",
+  marginBottom: 2,
+};
+const popupPill = {
+  display: "inline-block",
+  padding: "3px 10px",
+  borderRadius: 6,
+  fontSize: 13,
+  fontWeight: 600,
+  background: "#FFF6DB",
+  border: "1px solid #F0DFA0",
+  color: "#6B4E00",
+};
+
+function DetailPopup({
+  box,
+  detail,
+  sectionRows,
+  detailValue,
+  design,
+  locale,
+  catalog,
+  dispatch,
+  onClose,
+}) {
+  const sections = detail.sections || [];
+  const write = (path, value) =>
+    dispatch({ type: "set", target: "box", id: box.id, path, value });
+  const setSections = (next) => write("table.detail.sections", next);
+  const patch = (i, p) =>
+    setSections(sections.map((sec, idx) => (idx === i ? { ...sec, ...p } : sec)));
+  const move = (i, d) => {
+    const j = i + d;
+    if (j < 0 || j >= sections.length) return;
+    const next = [...sections];
+    [next[i], next[j]] = [next[j], next[i]];
+    setSections(next);
+  };
+  const remove = (i) => setSections(sections.filter((_, idx) => idx !== i));
+  const add = (type) => setSections([...sections, newDetailSection(type)]);
+
+  const allCols = (catalog?.tables || []).flatMap((t) =>
+    typeof t === "string"
+      ? []
+      : (t.columns || [])
+          .map((c) => (typeof c === "string" ? c : c.name))
+          .filter(Boolean)
+          .map((n) => `${t.name}.${n}`)
+  );
+  const known = new Set(allCols);
+  const listId = `dl-${box.id}`;
+
+  const alias = (ref) => String(ref || "").replace(/\./g, "__");
+  const labelFrom = (ref) => String(ref).split(".").pop().replace(/_/g, " ");
+  const valueOf = (rows, col) => {
+    const r = rows?.[0];
+    return r ? r[alias(col)] ?? r[col] : undefined;
+  };
+  const show = (val, fmt) =>
+    val === undefined || val === null || val === ""
+      ? "—"
+      : fmtCell(val, fmt || "auto", locale);
+
+  const renderEditor = (sec, i) => {
+    const cols = sec.columns || [];
+    const patchCol = (j, p) =>
+      patch(i, {
+        columns: cols.map((c, idx) => (idx === j ? { ...c, ...p } : c)),
+      });
+    const swap = (j, d) => {
+      const k = j + d;
+      if (k < 0 || k >= cols.length) return;
+      const next = [...cols];
+      [next[j], next[k]] = [next[k], next[j]];
+      patch(i, { columns: next });
+    };
+
+    return (
+      <div
+        style={{
+          border: "1px dashed #B8C4C8",
+          borderRadius: 8,
+          padding: 10,
+          marginBottom: 12,
+          display: "grid",
+          gap: 8,
+          background: "#fff",
+        }}
+      >
+        <input
+          list={listId}
+          placeholder="Add a column — type to search any table.column (e.g. uom, material, vendor)"
+          onChange={(e) => {
+            const v = e.target.value;
+            if (known.has(v)) {
+              patch(i, {
+                columns: [...cols, { col: v, label: labelFrom(v), fmt: "auto" }],
+              });
+              e.target.value = "";
+            }
+          }}
+          style={{ padding: "6px 8px", width: "100%" }}
+        />
+
+        {cols.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {cols.map((c, j) => (
+              <span
+                key={`${c.col}-${j}`}
+                title={c.col}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "2px 6px",
+                  border: "1px solid #CBD5D8",
+                  borderRadius: 12,
+                  fontSize: 12,
+                }}
+              >
+                <button
+                  type="button"
+                  className="xbtn"
+                  title="Move left"
+                  disabled={j === 0}
+                  onClick={() => swap(j, -1)}
+                >
+                  ←
+                </button>
+                <Editable
+                  value={c.label || labelFrom(c.col)}
+                  placeholder="Label"
+                  style={{ display: "inline-block", minWidth: 40 }}
+                  onChange={(v) => patchCol(j, { label: v })}
+                />
+                <Select
+                  value={c.fmt || "auto"}
+                  options={FMTS}
+                  onChange={(v) => patchCol(j, { fmt: v })}
+                />
+                <button
+                  type="button"
+                  className="xbtn"
+                  title="Move right"
+                  disabled={j === cols.length - 1}
+                  onClick={() => swap(j, 1)}
+                >
+                  →
+                </button>
+                <button
+                  type="button"
+                  className="xbtn"
+                  title="Remove column"
+                  onClick={() =>
+                    patch(i, { columns: cols.filter((_, idx) => idx !== j) })
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderBody = (sec) => {
+    const cols = (sec.columns || []).filter((c) => c.col);
+    const data = sectionRows[sec.id];
+    const fresh = data && data.value === detailValue;
+
+    if (!cols.length) {
+      return design ? (
+        <p style={{ fontSize: 13, opacity: 0.7 }}>
+          Add columns above to fill this box.
+        </p>
+      ) : null;
+    }
+    if (!fresh || data.loading) return <p>Loading…</p>;
+    if (data.error) return <p role="alert">{data.error}</p>;
+
+    if (sec.type === "header") {
+      const [first, ...rest] = cols;
+      const pills = rest
+        .map((c) => show(valueOf(data.rows, c.col), c.fmt))
+        .filter((v) => v !== "—");
+      return (
+        <>
+          <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2 }}>
+            {show(valueOf(data.rows, first.col), first.fmt)}
+          </div>
+          {pills.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+              {pills.map((p, idx) => (
+                <span key={idx} style={popupPill}>
+                  {p}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      );
+    }
+
+    if (sec.type === "lineItems") {
+      if (!data.rows.length) return <p>No line items found.</p>;
+      return (
+        <div className="rt-table-wrap">
+          <table className="rt">
+            <thead>
+              <tr>
+                <th>#</th>
+                {cols.map((c, j) => (
+                  <th key={`${c.col}-${j}`}>{c.label || labelFrom(c.col)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.rows.map((row, r) => (
+                <tr key={r}>
+                  <td>{r + 1}</td>
+                  {cols.map((c, j) => (
+                    <td key={`${c.col}-${j}`}>
+                      {show(row[alias(c.col)] ?? row[c.col], c.fmt)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))",
+          gap: "18px 24px",
+        }}
+      >
+        {cols.map((c, j) => (
+          <div key={`${c.col}-${j}`}>
+            <div style={popupLabel}>{c.label || labelFrom(c.col)}</div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>
+              {show(valueOf(data.rows, c.col), c.fmt)}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const hasHeader = sections.some((sec) => sec.type === "header");
+
+  return (
+    <div style={{ position: "relative" }}>
+      <datalist id={listId}>
+        {allCols.map((v) => (
+          <option key={v} value={v} />
+        ))}
+      </datalist>
+
+      <button
+        type="button"
+        className="xbtn"
+        onClick={onClose}
+        aria-label="Close details"
+        style={{ position: "absolute", top: 0, right: 0, zIndex: 1 }}
+      >
+        ×
+      </button>
+
+      {!hasHeader && (
+        <h3 style={{ margin: "0 40px 16px 0" }}>
+          {detail.title || "Details"} — {detailValue}
+        </h3>
+      )}
+
+      {sections.map((sec, i) => {
+        const isHeader = sec.type === "header";
+        return (
+          <div
+            key={sec.id || i}
+            style={isHeader ? { marginBottom: 20, paddingRight: 40 } : popupCard}
+          >
+            {design ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <Editable
+                  value={sec.title}
+                  placeholder="Box title"
+                  style={{ ...popupSectionTitle, marginBottom: 0, flex: 1 }}
+                  onChange={(v) => patch(i, { title: v })}
+                />
+                <span style={{ fontSize: 11, opacity: 0.6 }}>
+                  {DETAIL_TYPE_LABEL[sec.type] || sec.type}
+                </span>
+                <button type="button" className="xbtn" title="Move up" disabled={i === 0} onClick={() => move(i, -1)}>
+                  ↑
+                </button>
+                <button type="button" className="xbtn" title="Move down" disabled={i === sections.length - 1} onClick={() => move(i, 1)}>
+                  ↓
+                </button>
+                <button type="button" className="xbtn" title="Remove this box" onClick={() => remove(i)}>
+                  ×
+                </button>
+              </div>
+            ) : (
+              !isHeader && <div style={popupSectionTitle}>{sec.title}</div>
+            )}
+
+            {design && renderEditor(sec, i)}
+            {renderBody(sec)}
+          </div>
+        );
+      })}
+
+      {design && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+          <button type="button" className="pb" onClick={() => add("fields")}>
+            + Add Box
+          </button>
+          <button type="button" className="pb" onClick={() => add("lineItems")}>
+            + Add Line Items
+          </button>
+          <button type="button" className="pb" onClick={() => add("header")}>
+            + Add Header
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---- popup section helpers ---- */
 const newPopupManualTable = () => {
   const stamp = uid("col");
@@ -228,6 +628,77 @@ function Body({ box }) {
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
   const recordKey = selectedReportRecord ? JSON.stringify(selectedReportRecord) : "";
+
+  /* Record popup boxes (header / details / line items) for the table box. */
+  const [sectionRows, setSectionRows] = React.useState({});
+  const tableDetail = box.kind === "table" ? box.table?.detail || {} : {};
+  const tableDetailSections = tableDetail.sections || [];
+  React.useEffect(() => {
+    if (box.kind !== "table" || !detailValue || !tableDetailSections.length) return;
+
+    const todo = tableDetailSections.filter((sec) =>
+      (sec.columns || []).some((c) => c.col)
+    );
+    if (!todo.length) return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+
+    setSectionRows((prev) => {
+      const next = { ...prev };
+      todo.forEach((sec) => {
+        next[sec.id] = { loading: true, rows: [], error: "", value: detailValue };
+      });
+      return next;
+    });
+
+    todo.forEach(async (sec) => {
+      try {
+        const data = await fetchDetailRows({
+          box,
+          processKey: state.processKey,
+          keyColumn: tableDetail.keyColumn,
+          value: detailValue,
+          columns: (sec.columns || []).map((c) => c.col).filter(Boolean),
+          limit: sec.type === "lineItems" ? tableDetail.limit || 100 : 1,
+          signal: controller.signal,
+        });
+        if (cancelled) return;
+        setSectionRows((prev) => ({
+          ...prev,
+          [sec.id]: { loading: false, rows: data.rows || [], error: "", value: detailValue },
+        }));
+      } catch (err) {
+        if (cancelled || err.name === "AbortError") return;
+        setSectionRows((prev) => ({
+          ...prev,
+          [sec.id]: {
+            loading: false,
+            rows: [],
+            error: err.message || "Could not load this box.",
+            value: detailValue,
+          },
+        }));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    box.kind,
+    detailValue,
+    tableDetail.keyColumn,
+    box.src?.base,
+    JSON.stringify(
+      tableDetailSections.map((sec) => [
+        sec.id,
+        sec.type,
+        (sec.columns || []).map((c) => c.col),
+      ])
+    ),
+  ]);
 
 React.useEffect(() => {
   if (box.kind !== "reportView") return;
@@ -981,13 +1452,7 @@ React.useEffect(() => {
 
             return (
               <section
-                className={`report-view-popup-section ${
-                  ["lineItems", "dataTable", "relatedTable", "manualTable"].includes(
-                    section.type
-                  )
-                    ? "report-view-popup-section-line-items"
-                    : ""
-                }`}
+                className="report-view-popup-section"
                 key={section.id || `standalone-${sectionIndex}`}
               >
                 <h4>{section.title || "Data Table"}</h4>
@@ -1437,7 +1902,7 @@ React.useEffect(() => {
                     className="pb"
                     onClick={() => addPopupSection("lineItems")}
                   >
-                    + Add Line Items
+                    + Add Box
                   </button>
                   <button
                     type="button"
@@ -1889,6 +2354,35 @@ if (box.tableMode === "graph") {
     setDetailValue("");
   };
 
+  const isDesign = state.mode === "design";
+  const hasSections = (detail.sections || []).length > 0;
+  /* First box added keeps whatever line-item columns were already set up. */
+  const legacyAsSection = () => {
+    const legacy = (detail.columns || []).filter((x) => x.col);
+    return legacy.length
+      ? [
+          {
+            id: uid("sec"),
+            type: "lineItems",
+            title: "Line Items",
+            columns: legacy.map((x) => ({
+              col: x.col,
+              label: x.label || x.col.split(".").pop().replace(/_/g, " "),
+              fmt: x.fmt || "auto",
+            })),
+          },
+        ]
+      : [];
+  };
+  const addFirstSection = (type) =>
+    dispatch({
+      type: "set",
+      target: "box",
+      id: box.id,
+      path: "table.detail.sections",
+      value: [...legacyAsSection(), newDetailSection(type)],
+    });
+
   const detailBody = detailItems === null ? null : (
     <>
                   {detailLoading ? (
@@ -2280,22 +2774,61 @@ if (box.tableMode === "graph") {
             if (e.target === e.currentTarget) closeDetail();
           }}
         >
-          <div className="report-view-modal" role="dialog" aria-modal="true">
-            <div className="report-view-modal-header">
-              <h3>
-                {detail.title || "Details"} — {detailValue}
-              </h3>
-              <button
-                type="button"
-                className="xbtn"
-                onClick={closeDetail}
-                aria-label="Close details"
-              >
-                ×
-              </button>
-            </div>
+          <div
+            className="report-view-modal"
+            role="dialog"
+            aria-modal="true"
+            style={
+              hasSections
+                ? { width: "min(1100px, 94vw)", maxHeight: "88vh", overflowY: "auto" }
+                : undefined
+            }
+          >
+            {hasSections ? (
+              <DetailPopup
+                box={box}
+                detail={detail}
+                sectionRows={sectionRows}
+                detailValue={detailValue}
+                design={isDesign}
+                locale={locale}
+                catalog={state.catalog}
+                dispatch={dispatch}
+                onClose={closeDetail}
+              />
+            ) : (
+              <>
+                <div className="report-view-modal-header">
+                  <h3>
+                    {detail.title || "Details"} — {detailValue}
+                  </h3>
+                  <button
+                    type="button"
+                    className="xbtn"
+                    onClick={closeDetail}
+                    aria-label="Close details"
+                  >
+                    ×
+                  </button>
+                </div>
 
-            {detailBody}
+                {detailBody}
+
+                {isDesign && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+                    <button type="button" className="pb" onClick={() => addFirstSection("fields")}>
+                      + Add Box
+                    </button>
+                    <button type="button" className="pb" onClick={() => addFirstSection("lineItems")}>
+                      + Add Line Items
+                    </button>
+                    <button type="button" className="pb" onClick={() => addFirstSection("header")}>
+                      + Add Header
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </div>
       )}

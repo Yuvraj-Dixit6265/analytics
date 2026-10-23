@@ -159,6 +159,12 @@ function Editable({
 
 export default function Box({ box, cols }) {
   const { state, dispatch } = useStore();
+  const [tablePage, setTablePage] = React.useState(1);
+  const [tablePageSize, setTablePageSize] = React.useState(10);
+  React.useEffect(() => {
+    setTablePage(1);
+    setTablePageSize(10);
+  }, [box.id]);
   const selected = state.sel?.kind === "box" && state.sel.id === box.id;
   const pending = state.pendingDel?.kind === "box" && state.pendingDel.id === box.id;
   const design = state.mode === "design";
@@ -4708,8 +4714,6 @@ function GraphTableData({ box, set }) {
 /* ---- table ---- */
 function TableData({ box, set }) {
   const { state, dispatch } = useStore();
-  const [tablePage, setTablePage] = React.useState(1);
-  const [tablePageSize, setTablePageSize] = React.useState(10);
   const c = box.table || {};
   React.useEffect(() => {
   const details = c.detail?.columns || [];

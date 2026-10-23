@@ -831,6 +831,118 @@ def get_pr_items(key, pr_number):
         return jsonify(
             error=f"could not load PR items: {str(exc)[:300]}"
         ), 502
+
+def _build_detail_query(
+    catalogue,
+    relationships,
+    parent_table,
+    lookup_column,
+    requested_columns,
+    limit,
+    extra_where_sql="",
+):
+    """Build a parameterized detail query using a consistent join tree."""
+    from collections import deque
+
+    if parent_table not in catalogue:
+        raise ValueError("Invalid parent table")
+    if lookup_column not in catalogue[parent_table]:
+        raise ValueError("Invalid lookup column")
+
+    # Build the relationship graph, retaining each join's actual columns.
+    graph = {}
+    for rel in relationships:
+        ft, fc = rel["from_table"], rel["from_column"]
+        tt, tc = rel["to_table"], rel["to_column"]
+
+        if ft not in catalogue or tt not in catalogue:
+            continue
+        if fc not in catalogue[ft] or tc not in catalogue[tt]:
+            continue
+
+        graph.setdefault(ft, []).append((tt, fc, tc))
+        graph.setdefault(tt, []).append((ft, tc, fc))
+
+    # Build one stable BFS tree rooted at the parent table.
+    parent_edge = {}
+    depth = {parent_table: 0}
+    queue = deque([parent_table])
+
+    while queue:
+        current = queue.popleft()
+        for neighbor, current_col, neighbor_col in graph.get(current, []):
+            if neighbor in depth:
+                continue
+            depth[neighbor] = depth[current] + 1
+            parent_edge[neighbor] = (
+                current, current_col, neighbor, neighbor_col
+            )
+            queue.append(neighbor)
+
+    resolved = []
+    required_tables = {parent_table}
+
+    for requested in requested_columns:
+        if "." in requested:
+            table, column = requested.split(".", 1)
+            if table not in catalogue or column not in catalogue[table]:
+                raise ValueError(f"Unknown detail column: {requested}")
+        else:
+            column = requested
+            if column in catalogue[parent_table]:
+                table = parent_table
+            else:
+                matches = [
+                    t for t, columns in catalogue.items()
+                    if column in columns and t in depth
+                ]
+                if len(matches) != 1:
+                    raise ValueError(
+                        f"Detail column '{column}' is ambiguous or "
+                        "unreachable; specify table.column"
+                    )
+                table = matches[0]
+
+        if table not in depth:
+            raise ValueError(
+                f"No relationship path to detail table '{table}'"
+            )
+
+        resolved.append((requested, table, column))
+        node = table
+        while node != parent_table:
+            required_tables.add(node)
+            node = parent_edge[node][0]
+
+    # Join required nodes in BFS order, using the same tree for every column.
+    join_parts = []
+    for table in sorted(
+        required_tables - {parent_table},
+        key=lambda t: (depth[t], t),
+    ):
+        left, left_col, right, right_col = parent_edge[table]
+        join_parts.append(
+            f"INNER JOIN `{right}` "
+            f"ON `{left}`.`{left_col}` = `{right}`.`{right_col}`"
+        )
+
+    select_parts = []
+    for requested, table, column in resolved:
+        alias = requested.replace("`", "``")
+        select_parts.append(
+            f"`{table}`.`{column}` AS `{alias}`"
+        )
+
+    sql = (
+        f"SELECT {', '.join(select_parts)} "
+        f"FROM `{parent_table}` "
+        f"{' '.join(join_parts)} "
+        f"WHERE `{parent_table}`.`{lookup_column}` = %s "
+        f"{extra_where_sql} LIMIT %s"
+    )
+
+    return sql
+
 @app.get("/api/processes/<key>/detail")
 @auth()
 def get_detail_rows(key):
@@ -874,204 +986,36 @@ def get_detail_rows(key):
     if lookup_column not in catalogue[parent_table]:
         return jsonify(error="invalid lookup column"), 400
 
-    # Convert configured values like:
-    # cart.material_id
-    # material.sku
-    # quantity
-    #
-    # into just the column names for matching.
-    wanted_columns = []
 
-    for item in requested_columns:
-        if "." in item:
-            _, column = item.split(".", 1)
-        else:
-            column = item
 
-        if column:
-            wanted_columns.append(column)
-
-    # Find DIRECTLY related tables.
-    candidates = []
-
-    for rel in relationships:
-        from_table = rel["from_table"]
-        from_column = rel["from_column"]
-        to_table = rel["to_table"]
-        to_column = rel["to_column"]
-
-        if from_table == parent_table:
-            detail_table = to_table
-            parent_join_column = from_column
-            detail_join_column = to_column
-
-        elif to_table == parent_table:
-            detail_table = from_table
-            parent_join_column = to_column
-            detail_join_column = from_column
-
-        else:
-            continue
-
-        if detail_table not in catalogue:
-            continue
-
-        table_columns = set(catalogue[detail_table])
-
-        matches = [
-            column
-            for column in wanted_columns
-            if column in table_columns
-        ]
-
-        if not matches:
-            continue
-
-        candidates.append({
-            "table": detail_table,
-            "parent_join_column": parent_join_column,
-            "detail_join_column": detail_join_column,
-            "matches": matches,
-        })
-
-    if not candidates:
-        print(
-            "AUTO DETAIL: no related table matched",
-            {
-                "parent_table": parent_table,
-                "requested_columns": requested_columns,
-            },
-        )
-        return jsonify(rows=[])
-
-    # The table matching the most requested columns wins.
-    candidates.sort(
-        key=lambda x: len(x["matches"]),
-        reverse=True,
-    )
-
-    selected = candidates[0]
-
-    detail_table = selected["table"]
-    parent_join_column = selected["parent_join_column"]
-    detail_join_column = selected["detail_join_column"]
-
-    # Preserve the order selected by the user, but only use
-    # columns that actually exist on the selected detail table.
-    detail_columns = [
-        column
-        for column in wanted_columns
-        if column in catalogue[detail_table]
-    ]
-
-    if not detail_columns:
-        return jsonify(rows=[])
-
-    select_parts = []
-
-    for requested in requested_columns:
-        if "." in requested:
-            _, column = requested.split(".", 1)
-        else:
-            column = requested
-
-        if column not in detail_columns:
-            continue
-
-        select_parts.append(
-            f"`{detail_table}`.`{column}` AS `{requested}`"
+    try:
+        sql = _build_detail_query(
+            catalogue=catalogue,
+            relationships=relationships,
+            parent_table=parent_table,
+            lookup_column=lookup_column,
+            requested_columns=requested_columns,
+            limit=limit,
         )
 
-    sql = f"""
-        SELECT {", ".join(select_parts)}
-        FROM `{parent_table}`
-        INNER JOIN `{detail_table}`
-            ON `{parent_table}`.`{parent_join_column}`
-            = `{detail_table}`.`{detail_join_column}`
-        WHERE `{parent_table}`.`{lookup_column}` = %s
-        LIMIT %s
-    """
+        with db.reporting(conn_row) as cur:
+            cur.execute(sql, (value, limit))
+            rows = cur.fetchall()
 
-    print(
-        "AUTO DETAIL:",
-        {
-            "parent_table": parent_table,
-            "detail_table": detail_table,
-            "parent_join_column": parent_join_column,
-            "detail_join_column": detail_join_column,
-            "detail_columns": detail_columns,
-        },
-    )
+        return jsonify(rows=db.clean(rows))
 
-    with db.reporting(conn_row) as cur:
-        cur.execute(sql, (value, limit))
-        rows = cur.fetchall()
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
 
-    return jsonify(rows=db.clean(rows))
-
-    # Prefer the related table containing the most requested
-    # child-specific columns, then the shortest relationship path.
-    candidates.sort(
-        key=lambda x: (
-            -x["matched"],
-            x["path_length"],
-        )
-    )
-
-    selected = candidates[0]
-
-    detail_table = selected["table"]
-    parent_join_col = selected["parent_join_col"]
-    child_join_col = selected["child_join_col"]
-
-    # Build columns from BOTH parent and child tables.
-    select_parts = []
-
-    for col in detail_columns:
-        if col in catalogue[parent_table]:
-            select_parts.append(
-                f"`{parent_table}`.`{col}` AS `{col}`"
-            )
-        elif col in catalogue[detail_table]:
-            select_parts.append(
-                f"`{detail_table}`.`{col}` AS `{col}`"
-            )
-
-    if not select_parts:
-        return jsonify(rows=[])
-
-    sql = f"""
-        SELECT {", ".join(select_parts)}
-        FROM `{parent_table}`
-        INNER JOIN `{detail_table}`
-            ON `{parent_table}`.`{parent_join_col}`
-            = `{detail_table}`.`{child_join_col}`
-        WHERE `{parent_table}`.`{lookup_column}` = %s
-        LIMIT %s
-    """
-
-    print(
-        "AUTO DETAIL:",
-        {
-            "parent_table": parent_table,
-            "detail_table": detail_table,
-            "parent_join_col": parent_join_col,
-            "child_join_col": child_join_col,
-            "detail_columns": detail_columns,
-        },
-    )
-    print("DETAIL SQL:", sql)
-    print("DETAIL PARAMS:", (value, limit))
-    with db.reporting(conn_row) as cur:
-        cur.execute(sql, (value, limit))
-        rows = cur.fetchall()
-
-    return jsonify(rows=db.clean(rows))
+    except Exception as exc:
+        app.logger.exception("Could not load authenticated detail rows")
+        return jsonify(
+            error=f"Could not load detail rows: {str(exc)[:300]}"
+        ), 500
 
 
-# --------------------------------------------------------------------------
-# publishing
-# --------------------------------------------------------------------------
+
+
 @app.post("/api/processes/<key>/write")
 @auth()
 def write_box(key):
@@ -2131,129 +2075,15 @@ def get_public_detail_rows(key, token):
             vendor_params = tuple(cond[1])
 
         # Convert:
-        # cart.material_id -> material_id
-        # asn_packages.quantity -> quantity
-        wanted_columns = []
 
-        for item in requested_columns:
-            if "." in item:
-                _, column = item.split(".", 1)
-            else:
-                column = item
-
-            if column:
-                wanted_columns.append(column)
-
-        # Find directly related detail table
-        candidates = []
-
-        for rel in relationships:
-            from_table = rel["from_table"]
-            from_column = rel["from_column"]
-            to_table = rel["to_table"]
-            to_column = rel["to_column"]
-
-            if from_table == parent_table:
-                detail_table = to_table
-                parent_join_column = from_column
-                detail_join_column = to_column
-
-            elif to_table == parent_table:
-                detail_table = from_table
-                parent_join_column = to_column
-                detail_join_column = from_column
-
-            else:
-                continue
-
-            if detail_table not in catalogue:
-                continue
-
-            matches = [
-                column
-                for column in wanted_columns
-                if column in catalogue[detail_table]
-            ]
-
-            if not matches:
-                continue
-
-            candidates.append({
-                "table": detail_table,
-                "parent_join_column": parent_join_column,
-                "detail_join_column": detail_join_column,
-                "matches": matches,
-            })
-
-        if not candidates:
-            print(
-                "PUBLIC AUTO DETAIL: no related table matched",
-                {
-                    "parent_table": parent_table,
-                    "requested_columns": requested_columns,
-                },
-            )
-            return jsonify(rows=[])
-
-        candidates.sort(
-            key=lambda x: len(x["matches"]),
-            reverse=True,
-        )
-
-        selected = candidates[0]
-
-        detail_table = selected["table"]
-        parent_join_column = selected["parent_join_column"]
-        detail_join_column = selected["detail_join_column"]
-
-        detail_columns = [
-            column
-            for column in wanted_columns
-            if column in catalogue[detail_table]
-        ]
-
-        if not detail_columns:
-            return jsonify(rows=[])
-
-        select_parts = []
-
-        for requested in requested_columns:
-            if "." in requested:
-                _, column = requested.split(".", 1)
-            else:
-                column = requested
-
-            if column not in detail_columns:
-                continue
-
-            select_parts.append(
-                f"`{detail_table}`.`{column}` AS `{requested}`"
-            )
-
-        if not select_parts:
-            return jsonify(rows=[])
-
-        sql = f"""
-            SELECT {", ".join(select_parts)}
-            FROM `{parent_table}`
-            INNER JOIN `{detail_table}`
-                ON `{parent_table}`.`{parent_join_column}`
-                = `{detail_table}`.`{detail_join_column}`
-            WHERE `{parent_table}`.`{lookup_column}` = %s
-              {vendor_sql}
-            LIMIT %s
-        """
-
-        print(
-            "PUBLIC AUTO DETAIL:",
-            {
-                "parent_table": parent_table,
-                "detail_table": detail_table,
-                "parent_join_column": parent_join_column,
-                "detail_join_column": detail_join_column,
-                "detail_columns": detail_columns,
-                "value": value,
-            },
+        sql = _build_detail_query(
+            catalogue=catalogue,
+            relationships=relationships,
+            parent_table=parent_table,
+            lookup_column=lookup_column,
+            requested_columns=requested_columns,
+            limit=limit,
+            extra_where_sql=f" {vendor_sql} " if vendor_sql else "",
         )
 
         with db.reporting(conn_row) as cur:
@@ -2262,11 +2092,16 @@ def get_public_detail_rows(key, token):
 
         return jsonify(rows=db.clean(rows))
 
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+
     except Exception as exc:
-        print("PUBLIC DETAIL ERROR:", exc)
+        app.logger.exception("Could not load public detail rows")
         return jsonify(
-            error=f"could not load detail rows: {str(exc)[:300]}"
+            error=f"Could not load detail rows: {str(exc)[:300]}"
         ), 502
+
+
 @app.get("/api/r/<key>/<token>/export/<fmt>")
 def export_public_report(key, token, fmt):
     if fmt not in ("pdf", "pptx"):

@@ -166,7 +166,22 @@ async function fetchDetailRows({ box, processKey, keyColumn, value, columns, lim
       `/api/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`,
       { signal }
     );
-    if (!res.ok) throw new Error("Could not load details");
+    if (!res.ok) {
+      let msg = "";
+      try {
+        const text = await res.text();
+        try {
+          const j = JSON.parse(text);
+          msg = j.detail || j.error || j.message || text;
+        } catch (_) {
+          msg = text;
+        }
+      } catch (_) {}
+      if (msg && typeof msg !== "string") msg = JSON.stringify(msg);
+      throw new Error(
+        `Could not load details${msg ? ` (${String(msg).slice(0, 160)})` : ""}`
+      );
+    }
     return await res.json();
   }
   return api.getDetailRows(
@@ -231,6 +246,7 @@ function DetailPopup({
   detail,
   sectionRows,
   detailValue,
+  record,
   design,
   locale,
   catalog,
@@ -240,7 +256,29 @@ function DetailPopup({
   const sections = detail.sections || [];
   const write = (path, value) =>
     dispatch({ type: "set", target: "box", id: box.id, path, value });
-  const setSections = (next) => write("table.detail.sections", next);
+  const setSections = (next) => {
+    write("table.detail.sections", next);
+    /* The detail list's column list is what the server allows on published
+       links, so keep it equal to every column used by the boxes. */
+    const seen = new Set();
+    const union = [];
+    next.forEach((sec) =>
+      (sec.columns || []).forEach((c) => {
+        if (c.col && !seen.has(c.col)) {
+          seen.add(c.col);
+          union.push({
+            col: c.col,
+            label: c.label || "",
+            fmt: c.fmt || "auto",
+            align: "left",
+            width: "auto",
+            on: true,
+          });
+        }
+      })
+    );
+    if (union.length) write("table.detail.columns", union);
+  };
   const patch = (i, p) =>
     setSections(sections.map((sec, idx) => (idx === i ? { ...sec, ...p } : sec)));
   const move = (i, d) => {
@@ -251,7 +289,19 @@ function DetailPopup({
     setSections(next);
   };
   const remove = (i) => setSections(sections.filter((_, idx) => idx !== i));
-  const add = (type) => setSections([...sections, newDetailSection(type)]);
+  const add = (type) =>
+    setSections(
+      type === "header"
+        ? [newDetailSection(type), ...sections]
+        : [...sections, newDetailSection(type)]
+    );
+  const reorder = (from, to) => {
+    if (Number.isNaN(from) || from === to || from < 0 || from >= sections.length) return;
+    const next = [...sections];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setSections(next);
+  };
 
   const allCols = (catalog?.tables || []).flatMap((t) =>
     typeof t === "string"
@@ -266,9 +316,13 @@ function DetailPopup({
 
   const alias = (ref) => String(ref || "").replace(/\./g, "__");
   const labelFrom = (ref) => String(ref).split(".").pop().replace(/_/g, " ");
+  /* Values for the clicked record: from the lookup, or straight from the
+     row that was clicked when that column is already in the report table. */
   const valueOf = (rows, col) => {
     const r = rows?.[0];
-    return r ? r[alias(col)] ?? r[col] : undefined;
+    const v = r ? r[alias(col)] ?? r[col] : undefined;
+    if (v !== undefined && v !== null && v !== "") return v;
+    return record ? record[alias(col)] ?? record[col] : undefined;
   };
   const show = (val, fmt) =>
     val === undefined || val === null || val === ""
@@ -391,18 +445,25 @@ function DetailPopup({
         </p>
       ) : null;
     }
-    if (!fresh || data.loading) return <p>Loading…</p>;
-    if (data.error) return <p role="alert">{data.error}</p>;
+    const ready = fresh && !data.loading;
+    const rowsNow = ready && !data.error ? data.rows : [];
+    if (sec.type === "lineItems") {
+      if (!ready) return <p>Loading…</p>;
+      if (data.error) return <p role="alert">{data.error}</p>;
+    } else if (!cols.some((c) => valueOf(rowsNow, c.col) !== undefined)) {
+      if (!ready) return <p>Loading…</p>;
+      if (data.error) return <p role="alert">{data.error}</p>;
+    }
 
     if (sec.type === "header") {
       const [first, ...rest] = cols;
       const pills = rest
-        .map((c) => show(valueOf(data.rows, c.col), c.fmt))
+        .map((c) => show(valueOf(rowsNow, c.col), c.fmt))
         .filter((v) => v !== "—");
       return (
         <>
           <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2 }}>
-            {show(valueOf(data.rows, first.col), first.fmt)}
+            {show(valueOf(rowsNow, first.col), first.fmt)}
           </div>
           {pills.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
@@ -459,7 +520,7 @@ function DetailPopup({
           <div key={`${c.col}-${j}`}>
             <div style={popupLabel}>{c.label || labelFrom(c.col)}</div>
             <div style={{ fontWeight: 700, fontSize: 15 }}>
-              {show(valueOf(data.rows, c.col), c.fmt)}
+              {show(valueOf(rowsNow, c.col), c.fmt)}
             </div>
           </div>
         ))}
@@ -493,15 +554,49 @@ function DetailPopup({
         </h3>
       )}
 
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(12, minmax(0, 1fr))",
+          gap: 16,
+          alignItems: "start",
+        }}
+      >
       {sections.map((sec, i) => {
         const isHeader = sec.type === "header";
         return (
           <div
             key={sec.id || i}
-            style={isHeader ? { marginBottom: 20, paddingRight: 40 } : popupCard}
+            style={{
+              gridColumn: `span ${isHeader ? 12 : sec.span || 12}`,
+              minWidth: 0,
+              ...(isHeader ? { paddingRight: 40 } : { ...popupCard, marginBottom: 0 }),
+            }}
+            onDragOver={(e) => {
+              if (design) e.preventDefault();
+            }}
+            onDrop={(e) => {
+              if (!design) return;
+              const raw = e.dataTransfer.getData("application/x-detail-section");
+              if (raw === "") return;
+              e.preventDefault();
+              reorder(Number(raw), i);
+            }}
           >
             {design ? (
               <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+                <span
+                  draggable
+                  onDragStart={(e) => {
+                    e.stopPropagation();
+                    e.dataTransfer.setData("application/x-detail-section", String(i));
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  title="Drag to move this box"
+                  style={{ cursor: "grab", opacity: 0.6, userSelect: "none" }}
+                >
+                  ⋮⋮
+                </span>
                 <Editable
                   value={sec.title}
                   placeholder="Box title"
@@ -511,6 +606,19 @@ function DetailPopup({
                 <span style={{ fontSize: 11, opacity: 0.6 }}>
                   {DETAIL_TYPE_LABEL[sec.type] || sec.type}
                 </span>
+                {!isHeader && (
+                  <Select
+                    value={sec.span || 12}
+                    numeric
+                    options={[
+                      [12, "Full width"],
+                      [6, "Half"],
+                      [4, "One third"],
+                      [3, "One quarter"],
+                    ]}
+                    onChange={(v) => patch(i, { span: v })}
+                  />
+                )}
                 <button type="button" className="xbtn" title="Move up" disabled={i === 0} onClick={() => move(i, -1)}>
                   ↑
                 </button>
@@ -530,6 +638,7 @@ function DetailPopup({
           </div>
         );
       })}
+      </div>
 
       {design && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
@@ -620,6 +729,7 @@ function Body({ box }) {
   const publicSlug = publicPath ? `${publicPath[1]}/${publicPath[2]}` : null;
   const [detailItems, setDetailItems] = React.useState(null);
   const [detailValue, setDetailValue] = React.useState("");
+  const [detailRow, setDetailRow] = React.useState(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [reportSearchTerm, setReportSearchTerm] = React.useState("");
   const [reportPage, setReportPage] = React.useState(1);
@@ -660,7 +770,7 @@ function Body({ box }) {
           keyColumn: tableDetail.keyColumn,
           value: detailValue,
           columns: (sec.columns || []).map((c) => c.col).filter(Boolean),
-          limit: sec.type === "lineItems" ? tableDetail.limit || 100 : 1,
+          limit: sec.type === "lineItems" ? tableDetail.limit || 100 : 5,
           signal: controller.signal,
         });
         if (cancelled) return;
@@ -2600,6 +2710,7 @@ if (box.tableMode === "graph") {
                         const clickedValue = String(value);
 
                         setDetailValue(clickedValue);
+                        setDetailRow(r);
                         setDetailItems([]);
                         setDetailLoading(true);
                           console.log("PROCESS KEY AT DETAIL:", state.processKey);
@@ -2790,6 +2901,7 @@ if (box.tableMode === "graph") {
                 detail={detail}
                 sectionRows={sectionRows}
                 detailValue={detailValue}
+                record={detailRow}
                 design={isDesign}
                 locale={locale}
                 catalog={state.catalog}

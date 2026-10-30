@@ -2865,6 +2865,16 @@ if (box.tableMode === "graph") {
         </React.Fragment>
       );
     })
+  ) : window.location.pathname.includes("/r/") ? (
+    <tr>
+      <td
+        className="ghost-note"
+        colSpan={shown.length}
+        style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted)", fontStyle: "normal" }}
+      >
+        No records found for your account.
+      </td>
+    </tr>
   ) : (
     <>
       {[0, 1, 2].map((i) => (

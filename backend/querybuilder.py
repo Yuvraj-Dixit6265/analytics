@@ -49,7 +49,12 @@ def vendor_condition(catalogue, table, column, value, via=None):
     """Return (SQL condition, parameters) restricting a table to one vendor."""
     cols = catalogue.get(table, set())
 
-    # 1. Explicit configured relationship, e.g. ASN -> PO -> vendor_id.
+    # 1. Direct vendor column match: if the table has vendor_id, use it directly.
+    # This avoids any unnecessary subqueries, joins, or collation mismatches.
+    if column in cols:
+        return f"{_quote(table)}.{_quote(column)} = %s", [value]
+
+    # 2. Explicit configured relationship, e.g. ASN -> PO -> vendor_id.
     rule = (via or {}).get(table)
     if rule and ":" in rule and "." in rule.split(":", 1)[1]:
         local, target = rule.split(":", 1)
@@ -64,7 +69,7 @@ def vendor_condition(catalogue, table, column, value, via=None):
                 f"AND `_vs`.{_quote(column)} = %s)"
             ), [value]
 
-    # 2. Supplier registration mapping through Vendor Master.
+    # 3. Supplier registration mapping through Vendor Master.
     if table == "supplier_registration":
         vm_cols = catalogue.get("vendor_master", set())
         sr_cols = catalogue.get("supplier_registration", set())
@@ -80,39 +85,34 @@ def vendor_condition(catalogue, table, column, value, via=None):
                 f"{_quote(table)}.`id`)"
             ), [value]
 
-    # 3. Vendor Master mapping (BP number, vendor name, company, or customer ID).
+    # 4. Vendor Master mapping ONLY when table has genuine vendor identifiers
+    # (bp_no, vendor_bpno, vendor_name, vendor, vendor_code).
     vm_cols = catalogue.get("vendor_master", set())
     if "vendor_id" in vm_cols:
-        table_vendor_cols = [
-            c for c in ("bp_no", "vendor_bpno", "vendor_name", "company", "vendor", "vendor_code", "customer_id", column)
-            if c in cols
-        ]
-        name_cols = [c for c in ("vendor_name", "legal_name", "name", "company_name", "trade_name") if c in vm_cols]
-        bp_cols = [c for c in ("bp_no", "bp_number", "vendor_code") if c in vm_cols]
-
         clauses = []
-        for tc in table_vendor_cols:
-            if tc in ("bp_no", "vendor_bpno"):
+        name_cols = [c for c in ("vendor_name", "legal_name", "name") if c in vm_cols]
+        bp_cols = [c for c in ("bp_no", "bp_number") if c in vm_cols]
+
+        for tc in ("bp_no", "vendor_bpno"):
+            if tc in cols:
                 for bc in bp_cols:
-                    clauses.append(f"`_vm`.`{bc}` = {_quote(table)}.`{tc}`")
+                    clauses.append(
+                        f"`_vm`.`{bc}` COLLATE utf8mb4_unicode_ci = {_quote(table)}.`{tc}` COLLATE utf8mb4_unicode_ci"
+                    )
+
+        for tc in ("vendor_name", "vendor"):
+            if tc in cols:
                 for nc in name_cols:
-                    clauses.append(f"`_vm`.`{nc}` = {_quote(table)}.`{tc}`")
-            elif tc in ("vendor_name", "company", "vendor"):
-                for nc in name_cols:
-                    clauses.append(f"`_vm`.`{nc}` = {_quote(table)}.`{tc}`")
+                    clauses.append(
+                        f"`_vm`.`{nc}` COLLATE utf8mb4_unicode_ci = {_quote(table)}.`{tc}` COLLATE utf8mb4_unicode_ci"
+                    )
+
+        for tc in ("vendor_code",):
+            if tc in cols:
                 for bc in bp_cols:
-                    clauses.append(f"`_vm`.`{bc}` = {_quote(table)}.`{tc}`")
-            elif tc in ("customer_id", "vendor_code"):
-                if tc in vm_cols:
-                    clauses.append(f"`_vm`.`{tc}` = {_quote(table)}.`{tc}`")
-                for bc in bp_cols:
-                    clauses.append(f"`_vm`.`{bc}` = {_quote(table)}.`{tc}`")
-            elif tc == column:
-                clauses.append(f"`_vm`.`vendor_id` = {_quote(table)}.`{column}`")
-                for bc in bp_cols:
-                    clauses.append(f"`_vm`.`{bc}` = {_quote(table)}.`{column}`")
-                for nc in name_cols:
-                    clauses.append(f"`_vm`.`{nc}` = {_quote(table)}.`{column}`")
+                    clauses.append(
+                        f"`_vm`.`{bc}` COLLATE utf8mb4_unicode_ci = {_quote(table)}.`{tc}` COLLATE utf8mb4_unicode_ci"
+                    )
 
         if clauses:
             seen = set()
@@ -122,10 +122,6 @@ def vendor_condition(catalogue, table, column, value, via=None):
                 f"WHERE `_vm`.`vendor_id` = %s "
                 f"AND ({' OR '.join(unique_clauses)}))"
             ), [value]
-
-    # 4. Direct vendor column fallback.
-    if column in cols:
-        return f"{_quote(table)}.{_quote(column)} = %s", [value]
 
     return None
 

@@ -517,9 +517,11 @@ def build(box, filters, state, catalogue, role_row=None, force=None):
                 if (cfg.get("dir") or "asc").lower() == "desc"
                 else "ASC"
             )
-            order = f"{scope.col(cfg['sort'])} {direction}"
-
-        limit = max(1, int(cfg.get("limit") or 10))
+        limit_cfg = cfg.get("limit")
+        if force or limit_cfg in (0, "0", "all", "All", None, ""):
+            limit = None
+        else:
+            limit = max(1, int(limit_cfg))
 
     else:
         raise BadDefinition(f"unknown box kind: {kind!r}")

@@ -2741,19 +2741,84 @@ if (box.tableMode === "graph") {
         String(detailValue) === String(rowDetailValue) &&
         detailItems !== null;
 
+      const handleRowClick = async () => {
+        if (!clickable || rowDetailValue == null) return;
+        const clickedValue = String(rowDetailValue);
+        if (isSelected) {
+          setDetailItems(null);
+          setDetailValue("");
+          return;
+        }
+
+        setDetailValue(clickedValue);
+        setDetailRow(r);
+        setDetailItems([]);
+        setDetailLoading(true);
+
+        try {
+          const isPublished = window.location.pathname.includes("/r/");
+          let data;
+          if (isPublished) {
+            const [, publicPath] = window.location.pathname.split("/r/");
+            const [publicKey, publicToken] = publicPath.split("/");
+
+            const params = new URLSearchParams({
+              parentTable: box?.src?.base || "",
+              lookupColumn: detail.keyColumn,
+              value: clickedValue,
+              detailColumns: (detail.columns || [])
+                .map((col) => col.col)
+                .filter(Boolean)
+                .join(","),
+              limit: String(detail.limit || 50),
+            });
+            const vt = new URLSearchParams(window.location.search).get("vt");
+            if (vt) params.set("vt", vt);
+
+            const res = await fetch(
+              `/api/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`
+            );
+
+            if (!res.ok) {
+              throw new Error("Could not load public detail rows");
+            }
+
+            data = await res.json();
+          } else {
+            data = await api.getDetailRows(
+              state.processKey,
+              box?.src?.base || "",
+              detail.keyColumn,
+              clickedValue,
+              (detail.columns || [])
+                .map((col) => col.col)
+                .filter(Boolean),
+              detail.limit || 50
+            );
+          }
+
+          setDetailItems(data.rows || []);
+        } catch (err) {
+          console.error("Could not load detail rows:", err);
+          setDetailItems([]);
+        } finally {
+          setDetailLoading(false);
+        }
+      };
+
       return (
         <React.Fragment key={i}>
           <tr
-            className={c.zebra && i % 2 ? "z" : undefined}
+            className={[
+              c.zebra && i % 2 ? "z" : "",
+              clickable ? "clickable-row" : "",
+              isSelected ? "selected-row" : "",
+            ].filter(Boolean).join(" ") || undefined}
+            style={clickable ? { cursor: "pointer" } : undefined}
+            onClick={clickable ? handleRowClick : undefined}
           >
             {shown.map((col) => {
               const value = r[alias(col.col)];
-
-              const isClickable =
-              detail.enabled &&
-              detail.keyColumn &&
-              String(col.col) === String(detail.keyColumn) &&
-              value != null;
               return (
                 <td
                   key={col.col}
@@ -2766,81 +2831,7 @@ if (box.tableMode === "graph") {
                       : undefined
                   }
                 >
-                  {isClickable ? (
-                    <button
-                      type="button"
-                      className="pr-link"
-                      onClick={async () => {
-                        const clickedValue = String(value);
-
-                        setDetailValue(clickedValue);
-                        setDetailRow(r);
-                        setDetailItems([]);
-                        setDetailLoading(true);
-                          console.log("PROCESS KEY AT DETAIL:", state.processKey);
-                          console.log("BOX ID:", box.id);
-                          console.log("BOX SRC:", box.src);
-                                                try {
-                          const isPublished = window.location.pathname.includes("/r/");
-
-                          let data;
-
-                          if (isPublished) {
-                            const [, publicPath] = window.location.pathname.split("/r/");
-                            const [publicKey, publicToken] = publicPath.split("/");
-
-                            const params = new URLSearchParams({
-                              parentTable: box?.src?.base || "",
-                              lookupColumn: detail.keyColumn,
-                              value: clickedValue,
-                              detailColumns: (detail.columns || [])
-                                .map((col) => col.col)
-                                .filter(Boolean)
-                                .join(","),
-                              limit: String(detail.limit || 20),
-                            });
-                            const vt = new URLSearchParams(window.location.search).get("vt");
-                            if (vt) params.set("vt", vt);
-
-                            const res = await fetch(
-                              `/api/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`
-                            );
-
-                            if (!res.ok) {
-                              throw new Error("Could not load public detail rows");
-                            }
-
-                            data = await res.json();
-                          } else {
-                            data = await api.getDetailRows(
-                              state.processKey,
-                              box?.src?.base || "",
-                              detail.keyColumn,
-                              clickedValue,
-                              (detail.columns || [])
-                                .map((col) => col.col)
-                                .filter(Boolean),
-                              detail.limit || 20
-                            );
-                          }
-
-                          setDetailItems(data.rows || []);
-                        } catch (err) {
-                          console.error(
-                            "Could not load detail rows:",
-                            err
-                          );
-                          setDetailItems([]);
-                        } finally {
-                          setDetailLoading(false);
-                        }
-                      }}
-                    >
-                      {fmtCell(value, col.fmt, locale)}
-                    </button>
-                  ) : (
-                    fmtCell(value, col.fmt, locale)
-                  )}
+                  {fmtCell(value, col.fmt, locale)}
                 </td>
               );
             })}
@@ -4580,7 +4571,7 @@ function GraphTableData({ box, set }) {
           <Select
             value={c.limit || 10}
             numeric
-            options={[5, 8, 10, 15, 25, 50]}
+            options={[5, 8, 10, 15, 25, 50, 100, 200, 500, 1000, [0, "All (No limit)"]]}
             onChange={(v) => set("table.limit", v)}
           />
         </Field>
@@ -4680,7 +4671,7 @@ const addAllColumns = () => {
           <Select
             value={c.limit || 10}
             numeric
-            options={[5, 8, 10, 15, 25, 50]}
+            options={[5, 8, 10, 15, 25, 50, 100, 200, 500, 1000, [0, "All (No limit)"]]}
             onChange={(v) => set("table.limit", v)}
           />
         </Field>

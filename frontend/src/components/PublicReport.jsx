@@ -727,20 +727,67 @@ function PublicBoxBody({
             String(rowDetailValue) &&
             detailItems !== null;
 
+          const handleRowClick = async () => {
+            if (!clickable || rowDetailValue == null) return;
+            const clickedValue = String(rowDetailValue);
+            if (isSelected) {
+              setDetailItems(null);
+              setDetailValue("");
+              return;
+            }
+
+            setDetailValue(clickedValue);
+            setDetailItems([]);
+            setDetailLoading(true);
+
+            try {
+              const params = new URLSearchParams({
+                parentTable: box?.src?.base || "",
+                lookupColumn: detail.keyColumn,
+                value: clickedValue,
+                detailColumns: (detail.columns || [])
+                  .map((col) => col.col)
+                  .filter(Boolean)
+                  .join(","),
+                limit: String(detail.limit || 50),
+              });
+
+              if (viewerToken) {
+                params.set("vt", viewerToken);
+              }
+              const detailUrl = `${API_BASE}/r/${encodeURIComponent(key)}/${encodeURIComponent(token)}/detail?${params.toString()}`;
+              const res = await fetch(detailUrl, {
+                headers: viewerHeaders,
+              });
+
+              if (!res.ok) {
+                throw new Error("Could not load detail rows");
+              }
+
+              const data = await res.json();
+              setDetailItems(data.rows || []);
+            } catch (err) {
+              console.error("Could not load detail rows:", err);
+              setDetailItems([]);
+            } finally {
+              setDetailLoading(false);
+            }
+          };
+
           return (
             <React.Fragment key={rowIndex}>
-              <tr>
+              <tr
+                className={[
+                  clickable ? "clickable-row" : "",
+                  isSelected ? "selected-row" : "",
+                ].filter(Boolean).join(" ") || undefined}
+                style={clickable ? { cursor: "pointer" } : undefined}
+                onClick={clickable ? handleRowClick : undefined}
+              >
                 {columns.map((col) => {
                   const value =
                     row[col.col] ??
                     row[col.col?.split(".").pop()];
-
-                  const isClickable =
-                    detail.enabled &&
-                    detail.keyColumn &&
-                    String(col.col) ===
-                    String(detail.keyColumn) &&
-                    value != null;
 
                   return (
                     <td
@@ -751,83 +798,10 @@ function PublicBoxBody({
                           : undefined
                       }
                     >
-                      {isClickable ? (
-                        <button
-                          type="button"
-                          className="pr-link"
-                          onClick={async () => {
-                            const clickedValue =
-                              String(value);
-
-                            setDetailValue(
-                              clickedValue
-                            );
-                            setDetailItems([]);
-                            setDetailLoading(true);
-
-                            try {
-                              const params = new URLSearchParams({
-                                parentTable: box?.src?.base || "",
-                                lookupColumn: detail.keyColumn,
-                                value: clickedValue,
-                                detailColumns: (detail.columns || [])
-                                  .map((col) => col.col)
-                                  .filter(Boolean)
-                                  .join(","),
-                                limit: String(detail.limit || 20),
-                              });
-
-                              console.log("PUBLIC DETAIL REQUEST", {
-                                key,
-                                token,
-                                parentTable: box?.src?.base || "",
-                                lookupColumn: detail.keyColumn,
-                                value: clickedValue,
-                                detailColumns: (detail.columns || [])
-                                  .map((col) => col.col)
-                                  .filter(Boolean),
-                              });
-                              if (viewerToken) {
-                                params.set("vt", viewerToken);
-                              }
-                              const detailUrl = `${API_BASE}/r/${encodeURIComponent(key)}/${encodeURIComponent(token)}/detail?${params.toString()}`;
-                              console.log(" PUBLIC DETAIL URL", detailUrl);
-                              const res = await fetch(detailUrl, {
-                                headers: viewerHeaders,
-                              });
-
-                              if (!res.ok) {
-                                throw new Error("Could not load detail rows");
-                              }
-
-                              const data = await res.json();
-
-                              console.log("PUBLIC DETAIL DATA", data);
-
-                              setDetailItems(data.rows || []);
-                            } catch (err) {
-                              console.error(
-                                "Could not load detail rows:",
-                                err
-                              );
-                              setDetailItems([]);
-                            } finally {
-                              setDetailLoading(false);
-                            }
-                          }}
-                        >
-                          {fmtCell(
-                            value,
-                            col.fmt,
-                            locale
-                          )}
-                        </button>
-                      ) : (
-                        fmtCell(
-                          value,
-                          col.fmt,
-                          locale
-                        )
+                      {fmtCell(
+                        value,
+                        col.fmt,
+                        locale
                       )}
                     </td>
                   );

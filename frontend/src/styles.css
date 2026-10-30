@@ -705,3 +705,30 @@ table.rt {
     max-height: 280px;
   }
 }
+
+/* Clickable table rows for detail view */
+tr.clickable-row {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+tr.clickable-row:hover td {
+  background-color: rgba(0, 0, 0, 0.035);
+}
+
+tr.selected-row td {
+  background-color: rgba(37, 99, 235, 0.05);
+}
+
+.pr-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  outline: none;
+  text-decoration: none;
+  box-shadow: none;
+}

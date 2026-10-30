@@ -25,7 +25,7 @@ function formatSlugUrl(slug, action = "") {
 }
 
 async function getPublishedReport(slug) {
-  const res = await fetch(`${API_BASE}/r/${encodeURIComponent(slug)}`, {
+  const res = await fetch(formatSlugUrl(slug), {
     headers: viewerHeaders,
   });
 

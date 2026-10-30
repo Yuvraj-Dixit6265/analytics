@@ -1249,13 +1249,26 @@ def _attach_vendor_scope(pub):
 
     if not raw:
         refuse("open this report from the vendor portal")
-    try:
-        claims = jwt.decode(raw, JWT_SECRET, algorithms=["HS256"],
-                            audience=VENDOR_TOKEN_AUD,
-                            options={"require": ["exp", "aud"]})
-    except jwt.ExpiredSignatureError:
-        refuse("your session has expired; reopen this report from the vendor portal")
-    except jwt.InvalidTokenError:
+    claims = None
+    candidate_secrets = [
+        JWT_SECRET,
+        JWT_SECRET + "  ",
+        JWT_SECRET.strip(),
+        JWT_SECRET.strip() + "  ",
+    ]
+    for s in candidate_secrets:
+        try:
+            claims = jwt.decode(raw, s, algorithms=["HS256"],
+                                audience=VENDOR_TOKEN_AUD,
+                                options={"require": ["exp", "aud"]})
+            break
+        except jwt.InvalidSignatureError:
+            continue
+        except jwt.ExpiredSignatureError:
+            refuse("your session has expired; reopen this report from the vendor portal")
+        except jwt.InvalidTokenError:
+            refuse("this report link is not valid for your account")
+    if not claims:
         refuse("this report link is not valid for your account")
     vendor_id = claims.get("vendor_id")
     if vendor_id in (None, ""):

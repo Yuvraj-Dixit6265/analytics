@@ -21,10 +21,15 @@ export const hasToken = () => !!token;
 const viewerToken = new URLSearchParams(window.location.search).get("vt") || "";
 const viewerHeaders = viewerToken ? { "X-Viewer-Token": viewerToken } : {};
 
+function withViewerToken(path) {
+  if (!viewerToken || path.includes("vt=")) return path;
+  return path + (path.includes("?") ? "&" : "?") + `vt=${encodeURIComponent(viewerToken)}`;
+}
+
 async function call(path, options = {}) {
   const { body, ...rest } = options;
 
-  const res = await fetch(BASE + path, {
+  const res = await fetch(BASE + withViewerToken(path), {
     ...rest,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -51,7 +56,7 @@ async function call(path, options = {}) {
 
 /* Downloads (PDF/PPTX/XLSX/Table exports) */
 async function download(path, filename) {
-  const res = await fetch(BASE + path, {
+  const res = await fetch(BASE + withViewerToken(path), {
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...viewerHeaders,

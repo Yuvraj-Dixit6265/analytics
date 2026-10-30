@@ -517,6 +517,7 @@ def build(box, filters, state, catalogue, role_row=None, force=None):
                 if (cfg.get("dir") or "asc").lower() == "desc"
                 else "ASC"
             )
+            order = f"{scope.col(cfg['sort'])} {direction}"
         limit_cfg = cfg.get("limit")
         if force or limit_cfg in (0, "0", "all", "All", None, ""):
             limit = None

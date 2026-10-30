@@ -2716,7 +2716,7 @@ if (box.tableMode === "graph") {
 
       <tbody>
   {rows.length ? (
-    rows.slice(0, c.limit || 10).map((r, i) => {
+    (window.location.pathname.includes("/r/") || !c.limit || c.limit === 0 ? rows : rows.slice(0, c.limit)).map((r, i) => {
       const detail = c.detail || {};
       console.log("DETAIL USED:", {
         baseTable: box?.src?.base || "",

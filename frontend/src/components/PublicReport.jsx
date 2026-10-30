@@ -25,7 +25,7 @@ function formatSlugUrl(slug, action = "") {
 }
 
 async function getPublishedReport(slug) {
-  const res = await fetch(formatSlugUrl(slug), {
+  const res = await fetch(`${API_BASE}/r/${encodeURIComponent(slug)}`, {
     headers: viewerHeaders,
   });
 
@@ -46,15 +46,13 @@ async function getPublishedReport(slug) {
 }
 
 async function executePublished(slug, definition, filters = {}) {
-  const res = await fetch(formatSlugUrl(slug, "execute"), {
+  const res = await fetch(`${API_BASE}/r/${encodeURIComponent(slug)}/execute`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...viewerHeaders,
     },
-    body: JSON.stringify({
-      filters,
-    }),
+    body: JSON.stringify({ filters }),
   });
 
   const text = await res.text();

@@ -4,10 +4,30 @@ import { normS, styleObj, frameStyle, fmtCell, fmtNumber } from "../model.js";
 import Chart from "../charts/Chart.jsx";
 import api from "../api.js";
 
+const viewerToken = new URLSearchParams(window.location.search).get("vt") || "";
+
+const viewerHeaders = viewerToken
+  ? { "X-Viewer-Token": viewerToken }
+  : {};
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
+function formatSlugUrl(slug, action = "") {
+  const clean = (slug || "").replace(/^\/+|\/+$/g, "");
+  const parts = clean.split("/").filter(Boolean).map(encodeURIComponent);
+  let url = `${API_BASE}/r/${parts.join("/")}`;
+  if (action) {
+    url += action.startsWith("/") ? action : `/${action}`;
+  }
+  if (viewerToken) {
+    url += (url.includes("?") ? "&" : "?") + `vt=${encodeURIComponent(viewerToken)}`;
+  }
+  return url;
+}
+
 async function getPublishedReport(slug) {
-  const res = await fetch(`${API_BASE}/r/${encodeURIComponent(slug)}`);
+  const res = await fetch(formatSlugUrl(slug), {
+    headers: viewerHeaders,
+  });
 
   const text = await res.text();
 
@@ -26,14 +46,15 @@ async function getPublishedReport(slug) {
 }
 
 async function executePublished(slug, definition, filters = {}) {
-  const res = await fetch(`${API_BASE}/r/${encodeURIComponent(slug)}/execute`, {
+  const res = await fetch(formatSlugUrl(slug, "execute"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...viewerHeaders,
     },
     body: JSON.stringify({
-  filters,
-}),
+      filters,
+    }),
   });
 
   const text = await res.text();
@@ -146,106 +167,85 @@ function PublicReportInner({ slug }) {
   return (
     <div className="pane public-report">
 
-      {/* ONLY download options for employees */}
+      {/* ONLY download options for employees / viewers */}
       <div
-  className="export-actions"
-  style={{
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 10,
-    marginBottom: 16,
-  }}
->
-  <a
-    className="pb go"
-    href={`${API_BASE}/r/${slug}/export/pdf`}
-  >
-    Download PDF
-  </a>
+        className="export-actions"
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          gap: 10,
+          marginBottom: 16,
+        }}
+      >
+        <a
+          className="pb go"
+          href={formatSlugUrl(slug, "export/pdf")}
+        >
+          Download PDF
+        </a>
 
-  <a
-    className="pb"
-    href={`${API_BASE}/r/${slug}/export/pptx`}
-  >
-    Download PPT
-  </a>
-  <div
-  style={{
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 10,
-    marginBottom: 16,
-  }}
->
-  <a
-    className="pb go"
-    href={`${API_BASE}/r/${slug}/export/pdf`}
-  >
-    Download PDF
-  </a>
+        <a
+          className="pb"
+          href={formatSlugUrl(slug, "export/pptx")}
+        >
+          Download PPT
+        </a>
 
-  <a
-    className="pb"
-    href={`${API_BASE}/r/${slug}/export/pptx`}
-  >
-    Download PPT
-  </a>
+        <button
+          className="pb"
+          type="button"
+          onClick={async () => {
+            const email = window.prompt(
+              "Enter the email address to send the report to:"
+            );
 
- <button
-  className="pb"
-  type="button"
-  onClick={async () => {
-    const email = window.prompt(
-      "Enter the email address to send the report to:"
-    );
+            if (!email) {
+              return;
+            }
 
-    if (!email) {
-      return;
-    }
+            try {
+              const response = await fetch(
+                formatSlugUrl(slug, "email"),
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    ...viewerHeaders,
+                  },
+                  body: JSON.stringify({
+                    email: email.trim(),
+                    message: "",
+                  }),
+                }
+              );
 
-    try {
-      const response = await fetch(
-        `${API_BASE}/r/${slug}/email`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            email: email.trim(),
-            message: "",
-          }),
-        }
-      );
+              const data = await response.json();
 
-      const data = await response.json();
+              if (!response.ok) {
+                throw new Error(
+                  data.error || "Failed to send report"
+                );
+              }
 
-      if (!response.ok) {
-        throw new Error(
-          data.error || "Failed to send report"
-        );
-      }
+              window.alert(
+                `Report successfully emailed to ${email}`
+              );
 
-      window.alert(
-        `Report successfully emailed to ${email}`
-      );
+            } catch (error) {
+              console.error(
+                "Email report error:",
+                error
+              );
 
-    } catch (error) {
-      console.error(
-        "Email report error:",
-        error
-      );
-
-      window.alert(
-        error.message || "Failed to send report"
-      );
-    }
-  }}
->
-  Email Report
-</button>
-</div>
-</div>
+              window.alert(
+                error.message || "Failed to send report"
+              );
+            }
+          }}
+        >
+          Email Report
+        </button>
+      </div>
 
       {/* Published report - read only */}
       <PublicCanvas doc={state.doc} />
@@ -260,7 +260,7 @@ function PublicCanvas({ doc }) {
         className="rep-name-wrap"
         style={
           normS(doc.nameStyle).align
-            ? { textAlign: normS(doc.nameStyle).align }
+            ? { tegxtAlign: normS(doc.nameStyle).align }
             : undefined
         }
       >
@@ -328,15 +328,15 @@ function PublicSection({ section, index }) {
     ...(nst.align === "center"
       ? { marginLeft: "auto", marginRight: "auto" }
       : nst.align === "right"
-      ? { marginLeft: "auto" }
-      : {}),
+        ? { marginLeft: "auto" }
+        : {}),
   };
 
   return (
-  <div
-  className="sec"
-  id={`section-${section.id}`}
-  >
+    <div
+      className="sec"
+      id={`section-${section.id}`}
+    >
       {nameVisible && (
         <>
           <div
@@ -344,13 +344,13 @@ function PublicSection({ section, index }) {
             style={
               nst.align
                 ? {
-                    justifyContent:
-                      nst.align === "center"
-                        ? "center"
-                        : nst.align === "right"
+                  justifyContent:
+                    nst.align === "center"
+                      ? "center"
+                      : nst.align === "right"
                         ? "flex-end"
                         : "flex-start",
-                  }
+                }
                 : undefined
             }
           >
@@ -494,10 +494,10 @@ function PublicBoxBody({
           {v === null || v === undefined
             ? "—"
             : formatNumber(
-                v,
-                box.value?.decimals,
-                locale
-              )}
+              v,
+              box.value?.decimals,
+              locale
+            )}
           {box.value?.suffix || ""}
           {box.value?.unit && (
             <span className="kpi-unit">
@@ -516,113 +516,113 @@ function PublicBoxBody({
   }
 
   if (box.kind === "chart") {
-  const c = box.chart || {};
+    const c = box.chart || {};
 
-  let data = result?.data || [];
+    let data = result?.data || [];
 
-  if (c.source === "table" && c.tableBoxId) {
-    const tableBox = state.doc.sections
-      .flatMap((section) => section.boxes || [])
-      .find((b) => b.id === c.tableBoxId);
+    if (c.source === "table" && c.tableBoxId) {
+      const tableBox = state.doc.sections
+        .flatMap((section) => section.boxes || [])
+        .find((b) => b.id === c.tableBoxId);
 
-    if (tableBox) {
-      const categoryId =
-        c.tableCategoryColumnId;
+      if (tableBox) {
+        const categoryId =
+          c.tableCategoryColumnId;
 
-      const valueId =
-        c.tableValueColumnId;
+        const valueId =
+          c.tableValueColumnId;
 
-      if (tableBox.tableMode === "manual") {
-        const columns =
-          tableBox.manualTable?.columns || [];
+        if (tableBox.tableMode === "manual") {
+          const columns =
+            tableBox.manualTable?.columns || [];
 
-        const categoryIndex =
-          columns.findIndex(
-            (col) => col.id === categoryId
-          );
-
-        const valueIndex =
-          columns.findIndex(
-            (col) => col.id === valueId
-          );
-
-        if (
-          categoryIndex >= 0 &&
-          valueIndex >= 0
-        ) {
-          data = (
-            tableBox.manualTable?.rows || []
-          )
-            .map((row) => ({
-              label:
-                row.cells?.[categoryIndex] || "",
-              value:
-                Number(
-                  row.cells?.[valueIndex]
-                ) || 0,
-            }))
-            .filter(
-              (row) => row.label !== ""
+          const categoryIndex =
+            columns.findIndex(
+              (col) => col.id === categoryId
             );
-        }
-      } else {
-        const columns =
-          tableBox.table?.columns || [];
 
-        const categoryColumn =
-          columns.find(
-            (col) => col.col === categoryId
-          );
-
-        const valueColumn =
-          columns.find(
-            (col) => col.col === valueId
-          );
-
-        const tableResult =
-          state.results[tableBox.id];
-
-        if (
-          categoryColumn &&
-          valueColumn &&
-          tableResult?.rows
-        ) {
-          data = tableResult.rows
-            .map((row) => ({
-              label:
-                row[categoryColumn.col] ?? "",
-              value:
-                Number(
-                  row[valueColumn.col]
-                ) || 0,
-            }))
-            .filter(
-              (row) => row.label !== ""
+          const valueIndex =
+            columns.findIndex(
+              (col) => col.id === valueId
             );
+
+          if (
+            categoryIndex >= 0 &&
+            valueIndex >= 0
+          ) {
+            data = (
+              tableBox.manualTable?.rows || []
+            )
+              .map((row) => ({
+                label:
+                  row.cells?.[categoryIndex] || "",
+                value:
+                  Number(
+                    row.cells?.[valueIndex]
+                  ) || 0,
+              }))
+              .filter(
+                (row) => row.label !== ""
+              );
+          }
+        } else {
+          const columns =
+            tableBox.table?.columns || [];
+
+          const categoryColumn =
+            columns.find(
+              (col) => col.col === categoryId
+            );
+
+          const valueColumn =
+            columns.find(
+              (col) => col.col === valueId
+            );
+
+          const tableResult =
+            state.results[tableBox.id];
+
+          if (
+            categoryColumn &&
+            valueColumn &&
+            tableResult?.rows
+          ) {
+            data = tableResult.rows
+              .map((row) => ({
+                label:
+                  row[categoryColumn.col] ?? "",
+                value:
+                  Number(
+                    row[valueColumn.col]
+                  ) || 0,
+              }))
+              .filter(
+                (row) => row.label !== ""
+              );
+          }
         }
       }
     }
-  }
 
-  if (!data.length) {
+    if (!data.length) {
+      return (
+        <div className="ph">
+          <b>No data</b>
+        </div>
+      );
+    }
+
     return (
-      <div className="ph">
-        <b>No data</b>
+      <div className="chartwrap">
+        <div className="chartsvg">
+          <Chart
+            data={data}
+            cfg={box.chart}
+          />
+        </div>
       </div>
     );
   }
-
-  return (
-    <div className="chartwrap">
-      <div className="chartsvg">
-        <Chart
-          data={data}
-          cfg={box.chart}
-        />
-      </div>
-    </div>
-  );
-}
 
   // Manual Table: data is stored directly in the box definition,
   // so it does not come from state.results.
@@ -726,7 +726,7 @@ function PublicBoxBody({
           const isSelected =
             rowDetailValue != null &&
             String(detailValue) ===
-              String(rowDetailValue) &&
+            String(rowDetailValue) &&
             detailItems !== null;
 
           return (
@@ -741,7 +741,7 @@ function PublicBoxBody({
                     detail.enabled &&
                     detail.keyColumn &&
                     String(col.col) ===
-                      String(detail.keyColumn) &&
+                    String(detail.keyColumn) &&
                     value != null;
 
                   return (
@@ -768,45 +768,46 @@ function PublicBoxBody({
                             setDetailLoading(true);
 
                             try {
-                                const params = new URLSearchParams({
-                                  parentTable: box?.src?.base || "",
-                                  lookupColumn: detail.keyColumn,
-                                  value: clickedValue,
-                                  detailColumns: (detail.columns || [])
-                                    .map((col) => col.col)
-                                    .filter(Boolean)
-                                    .join(","),
-                                  limit: String(detail.limit || 20),
-                                });
+                              const params = new URLSearchParams({
+                                parentTable: box?.src?.base || "",
+                                lookupColumn: detail.keyColumn,
+                                value: clickedValue,
+                                detailColumns: (detail.columns || [])
+                                  .map((col) => col.col)
+                                  .filter(Boolean)
+                                  .join(","),
+                                limit: String(detail.limit || 20),
+                              });
 
-                                console.log("PUBLIC DETAIL REQUEST", {
-                                  key,
-                                  token,
-                                  parentTable: box?.src?.base || "",
-                                  lookupColumn: detail.keyColumn,
-                                  value: clickedValue,
-                                  detailColumns: (detail.columns || [])
-                                    .map((col) => col.col)
-                                    .filter(Boolean),
-                                });
-                                console.log(
-                                  " PUBLIC DETAIL URL",
-                                  `${API_BASE}/r/${encodeURIComponent(key)}/${encodeURIComponent(token)}/detail?${params.toString()}`
-                                );
-                                const res = await fetch(
-                                  `${API_BASE}/r/${encodeURIComponent(key)}/${encodeURIComponent(token)}/detail?${params.toString()}`
-                                );  
+                              console.log("PUBLIC DETAIL REQUEST", {
+                                key,
+                                token,
+                                parentTable: box?.src?.base || "",
+                                lookupColumn: detail.keyColumn,
+                                value: clickedValue,
+                                detailColumns: (detail.columns || [])
+                                  .map((col) => col.col)
+                                  .filter(Boolean),
+                              });
+                              if (viewerToken) {
+                                params.set("vt", viewerToken);
+                              }
+                              const detailUrl = `${API_BASE}/r/${encodeURIComponent(key)}/${encodeURIComponent(token)}/detail?${params.toString()}`;
+                              console.log(" PUBLIC DETAIL URL", detailUrl);
+                              const res = await fetch(detailUrl, {
+                                headers: viewerHeaders,
+                              });
 
-                                if (!res.ok) {
-                                  throw new Error("Could not load detail rows");
-                                }
+                              if (!res.ok) {
+                                throw new Error("Could not load detail rows");
+                              }
 
-                                const data = await res.json();
+                              const data = await res.json();
 
-                                console.log("PUBLIC DETAIL DATA", data);
+                              console.log("PUBLIC DETAIL DATA", data);
 
-                                setDetailItems(data.rows || []);
-                              } catch (err) {
+                              setDetailItems(data.rows || []);
+                            } catch (err) {
                               console.error(
                                 "Could not load detail rows:",
                                 err
@@ -902,14 +903,14 @@ function PublicBoxBody({
                                         (col) => {
                                           const value =
                                             item[
-                                              col.col
+                                            col.col
                                             ] ??
                                             item[
-                                              col.col
-                                                ?.split(
-                                                  "."
-                                                )
-                                                .pop()
+                                            col.col
+                                              ?.split(
+                                                "."
+                                              )
+                                              .pop()
                                             ];
 
                                           return (

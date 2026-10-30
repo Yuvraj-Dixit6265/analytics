@@ -46,7 +46,7 @@ async function getPublishedReport(slug) {
 }
 
 async function executePublished(slug, definition, filters = {}) {
-  const res = await fetch(`${API_BASE}/r/${encodeURIComponent(slug)}/execute`, {
+  const res = await fetch(formatSlugUrl(slug, "execute"), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

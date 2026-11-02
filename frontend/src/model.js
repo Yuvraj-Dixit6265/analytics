@@ -392,17 +392,69 @@ export const fmtNumber = (n, dec, locale) =>
     : Number(n).toLocaleString(locale || "en-IN",
         { minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0 });
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function fmtDate(v) {
+  if (v === null || v === undefined || v === "") return "";
+  if (typeof v === "string") {
+    // 1. HTTP date: "Mon, 02 Nov 2026 00:00:00 GMT" or "02 Nov 2026"
+    const httpMatch = v.match(/^(?:[A-Za-z]{3},\s*)?(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})/);
+    if (httpMatch) {
+      const day = httpMatch[1].padStart(2, "0");
+      const mon = httpMatch[2];
+      const yr = httpMatch[3];
+      return `${day}-${mon}-${yr}`;
+    }
+    // 2. ISO date: "2026-11-02" or "2026-11-02T00:00:00"
+    const isoMatch = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      const yr = isoMatch[1];
+      const mIdx = parseInt(isoMatch[2], 10) - 1;
+      const day = isoMatch[3];
+      const mon = MONTHS[mIdx] || isoMatch[2];
+      return `${day}-${mon}-${yr}`;
+    }
+    // 3. Fallback for valid date strings
+    const d = new Date(v);
+    if (!isNaN(d.getTime()) && v.length > 8 && !/^\d+$/.test(v)) {
+      const day = String(d.getUTCDate()).padStart(2, "0");
+      const mon = MONTHS[d.getUTCMonth()];
+      const yr = d.getUTCFullYear();
+      return `${day}-${mon}-${yr}`;
+    }
+  }
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    const day = String(v.getUTCDate()).padStart(2, "0");
+    const mon = MONTHS[v.getUTCMonth()];
+    const yr = v.getUTCFullYear();
+    return `${day}-${mon}-${yr}`;
+  }
+  return String(v);
+}
+
 export function fmtCell(v, fmt, locale) {
   if (v === null || v === undefined || v === "") return "";
   switch (fmt) {
     case "number": return fmtNumber(v, 0, locale);
     case "currency": return "₹" + fmtNumber(v, 0, locale);
     case "percent": return fmtNumber(v, 1, locale) + "%";
-    case "date": return String(v).slice(0, 10);
+    case "date": return fmtDate(v);
     case "text": return String(v);
     default:
-      return typeof v === "number"
-        ? fmtNumber(v, Number.isInteger(v) ? 0 : 1, locale)
-        : String(v);
+      if (typeof v === "number") {
+        return fmtNumber(v, Number.isInteger(v) ? 0 : 1, locale);
+      }
+      if (typeof v === "string") {
+        // If string matches HTTP date (e.g. "Mon, 02 Nov 2026 00:00:00 GMT")
+        // or ISO date timestamp (e.g. "2026-11-02T00:00:00" or "2026-11-02"), format cleanly as date
+        if (
+          /^(?:[A-Za-z]{3},\s*)?\d{1,2}\s+[A-Za-z]{3}\s+\d{4}/.test(v) ||
+          /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2})?(?:\.000Z)?$/.test(v)
+        ) {
+          return fmtDate(v);
+        }
+      }
+      return String(v);
   }
 }
+

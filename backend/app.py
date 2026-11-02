@@ -53,7 +53,9 @@ class _SafeJSONProvider(DefaultJSONProvider):
         if isinstance(obj, Decimal):
             return float(obj)
         if isinstance(obj, (date, datetime)):
-            return obj.isoformat()
+            if isinstance(obj, datetime) and (obj.hour != 0 or obj.minute != 0 or obj.second != 0):
+                return obj.isoformat()
+            return obj.strftime("%Y-%m-%d")
         return super().default(obj)
 
 # Error monitoring (Bugsink, Sentry protocol). Off unless SENTRY_DSN is set in the environment.
@@ -67,6 +69,7 @@ if os.environ.get("SENTRY_DSN"):
     )
 
 app = Flask(__name__)
+app.json = _SafeJSONProvider(app)
 # Definitions are small; the one request that is not is an AI prompt carrying
 # attached screenshots. Bound it here so a stray upload is refused at the door
 # rather than being buffered in full first.

@@ -252,13 +252,23 @@ function PublicReportInner({ slug }) {
 }
 
 function PublicCanvas({ doc }) {
+  const visibleSections = (doc.sections || []).filter(
+    (section) => section.visible !== false
+  );
+  const namedSections = visibleSections.filter(
+    (section) => section.name && section.name.trim() !== ""
+  );
+  const [activeSectionId, setActiveSectionId] = React.useState(
+    namedSections[0]?.id || visibleSections[0]?.id || null
+  );
+
   return (
     <div className="sheet">
       <div
         className="rep-name-wrap"
         style={
           normS(doc.nameStyle).align
-            ? { tegxtAlign: normS(doc.nameStyle).align }
+            ? { textAlign: normS(doc.nameStyle).align }
             : undefined
         }
       >
@@ -266,24 +276,33 @@ function PublicCanvas({ doc }) {
           className="rep-name"
           style={styleObj(normS(doc.nameStyle))}
         >
-          {doc.name}
+          {doc.name || "Vendor Purchase Order Report"}
         </div>
+        {doc.desc && (
+          <div className="rep-subtitle">
+            {doc.desc}
+          </div>
+        )}
       </div>
-      {doc.sections?.length > 0 && (
+
+      {namedSections.length > 1 && (
         <div className="section-nav">
-          {doc.sections
-            .filter((section) => section.visible !== false)
-            .map((section) => (
+          {namedSections.map((section) => {
+            const isActive =
+              (activeSectionId || namedSections[0]?.id) === section.id;
+            return (
               <button
                 key={section.id}
                 type="button"
-                className="section-nav-item TEST-BUTTON" data-test-nav="yes"
+                className={`section-nav-item ${isActive ? "active" : ""}`}
                 onClick={() => {
+                  setActiveSectionId(section.id);
                   const el = document.getElementById(`section-${section.id}`);
-
                   if (el) {
-                    const y = el.getBoundingClientRect().top + window.scrollY;
-
+                    const y =
+                      el.getBoundingClientRect().top +
+                      window.scrollY -
+                      30;
                     window.scrollTo({
                       top: y,
                       behavior: "smooth",
@@ -291,12 +310,14 @@ function PublicCanvas({ doc }) {
                   }
                 }}
               >
-                {section.name || "Untitled Section"}
+                {section.name}
               </button>
-            ))}
+            );
+          })}
         </div>
       )}
-      {doc.sections.map((section, index) => (
+
+      {visibleSections.map((section, index) => (
         <PublicSection
           key={section.id}
           section={section}
@@ -732,7 +753,8 @@ function PublicBoxBody({
     );
 
   return (
-    <table className="rt">
+    <>
+      <table className="rt">
       <thead>
         <tr>
           {columns.map((col) => (
@@ -831,10 +853,11 @@ function PublicBoxBody({
                 style={clickable ? { cursor: "pointer" } : undefined}
                 onClick={clickable ? handleRowClick : undefined}
               >
-                {columns.map((col) => {
+                {columns.map((col, colIdx) => {
                   const value =
                     row[col.col] ??
                     row[col.col?.split(".").pop()];
+                  const isKeyCol = clickable && (String(col.col) === String(detail.keyColumn) || colIdx === 0);
 
                   return (
                     <td
@@ -845,10 +868,17 @@ function PublicBoxBody({
                           : undefined
                       }
                     >
-                      {fmtCell(
-                        value,
-                        col.fmt,
-                        locale
+                      {isKeyCol ? (
+                        <span className="po-toggle-wrap">
+                          <span className="po-arrow">{isSelected ? "▼" : "▶"}</span>
+                          <span className="po-link">{fmtCell(value, col.fmt, locale)}</span>
+                        </span>
+                      ) : (
+                        fmtCell(
+                          value,
+                          col.fmt,
+                          locale
+                        )
                       )}
                     </td>
                   );
@@ -856,33 +886,16 @@ function PublicBoxBody({
               </tr>
 
               {isSelected && (
-                <tr>
-                  <td colSpan={columns.length}>
-                    <div className="pr-inline">
-                      <div className="pr-inline-header">
-                        <strong>
-                          {detail.title || "Details"} —{" "}
-                          {detailValue}
-                        </strong>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDetailItems(null);
-                            setDetailValue("");
-                          }}
-                        >
-                          ×
-                        </button>
-                      </div>
-
+                <tr className="pr-detail-row">
+                  <td colSpan={columns.length} className="pr-detail-cell">
+                    <div className="pr-detail-container">
                       {detailLoading ? (
-                        <div className="pr-empty">
-                          Loading details...
+                        <div className="pr-empty" style={{ padding: "20px", textAlign: "center", color: "#64748B" }}>
+                          Loading line items...
                         </div>
                       ) : detailItems.length === 0 ? (
-                        <div className="pr-empty">
-                          No detail records found.
+                        <div className="pr-empty" style={{ padding: "20px", textAlign: "center", color: "#64748B" }}>
+                          No line items found for this order.
                         </div>
                       ) : (
                         <div className="pr-items-table-wrap">
@@ -894,7 +907,10 @@ function PublicBoxBody({
                                     (col) => col.col
                                   )
                                   .map((col) => (
-                                    <th key={col.col}>
+                                    <th
+                                      key={col.col}
+                                      className={col.align === "right" ? "num" : undefined}
+                                    >
                                       {col.label ||
                                         col.col}
                                     </th>
@@ -937,6 +953,11 @@ function PublicBoxBody({
                                               key={
                                                 col.col
                                               }
+                                              className={
+                                                col.align === "right"
+                                                  ? "num"
+                                                  : undefined
+                                              }
                                             >
                                               {fmtCell(
                                                 value,
@@ -951,6 +972,46 @@ function PublicBoxBody({
                                 )
                               )}
                             </tbody>
+                            {detailItems.length > 0 && (
+                              <tfoot>
+                                <tr>
+                                  {(detail.columns || [])
+                                    .filter((col) => col.col)
+                                    .map((col, i) => {
+                                      const values = detailItems.map(
+                                        (item) => item[col.col] ?? item[col.col?.split(".").pop()]
+                                      );
+                                      const numericValues = values.filter(
+                                        (val) => typeof val === "number" || (typeof val === "string" && val.trim() !== "" && !isNaN(val) && !isNaN(parseFloat(val)))
+                                      );
+                                      const isNumCol = col.align === "right" || (numericValues.length > 0 && numericValues.length === values.filter((val) => val != null && val !== "").length);
+                                      const allCurrency = values.length > 0 && values.every((val) => val === "INR" || val === "USD" || val === "EUR");
+
+                                      return (
+                                        <td
+                                          key={col.col}
+                                          className={col.align === "right" || isNumCol ? "num" : undefined}
+                                        >
+                                          {i === 0
+                                            ? "Total"
+                                            : isNumCol
+                                            ? fmtCell(
+                                                detailItems.reduce(
+                                                  (a, item) => a + (Number(item[col.col] ?? item[col.col?.split(".").pop()]) || 0),
+                                                  0
+                                                ),
+                                                col.fmt || "number",
+                                                locale
+                                              )
+                                            : allCurrency
+                                            ? values[0]
+                                            : ""}
+                                        </td>
+                                      );
+                                    })}
+                                </tr>
+                              </tfoot>
+                            )}
                           </table>
                         </div>
                       )}
@@ -962,7 +1023,76 @@ function PublicBoxBody({
           );
         })}
       </tbody>
+      {rows.length > 0 && (
+        <tfoot>
+          <tr>
+            {columns.map((col, i) => {
+              const values = rows.map(
+                (r) => r[col.col] ?? r[col.col?.split(".").pop()]
+              );
+              const numericValues = values.filter(
+                (val) =>
+                  typeof val === "number" ||
+                  (typeof val === "string" &&
+                    val.trim() !== "" &&
+                    !isNaN(val) &&
+                    !isNaN(parseFloat(val)))
+              );
+              const isNumCol =
+                col.align === "right" ||
+                (numericValues.length > 0 &&
+                  numericValues.length ===
+                    values.filter((val) => val != null && val !== "").length);
+              const allCurrency =
+                values.length > 0 &&
+                values.every(
+                  (val) =>
+                    val === "INR" || val === "USD" || val === "EUR"
+                );
+
+              return (
+                <td
+                  key={col.col}
+                  className={
+                    col.align === "right" || isNumCol ? "num" : undefined
+                  }
+                >
+                  {i === 0
+                    ? `Total (${rows.length} ${rows.length === 1 ? "order" : "orders"})`
+                    : isNumCol
+                    ? fmtCell(
+                        rows.reduce(
+                          (a, r) =>
+                            a +
+                            (Number(
+                              r[col.col] ?? r[col.col?.split(".").pop()]
+                            ) || 0),
+                          0
+                        ),
+                        col.fmt || "currency",
+                        locale
+                      )
+                    : allCurrency
+                    ? values[0]
+                    : ""}
+                </td>
+              );
+            })}
+          </tr>
+        </tfoot>
+      )}
     </table>
+    <div className="report-table-footnote">
+      {box.table?.note ? (
+        <p>{box.table.note}</p>
+      ) : clickable ? (
+        <>
+          <p>Select a purchase order number to show or hide its line items.</p>
+          <p>Sample data for illustration. TDS is calculated on Total Price (before GST). TDS sections follow Income-tax Act, 1961 numbering.</p>
+        </>
+      ) : null}
+    </div>
+    </>
   );
 }
 function formatNumber(value, decimals, locale) {

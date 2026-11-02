@@ -2827,8 +2827,10 @@ if (box.tableMode === "graph") {
             style={clickable ? { cursor: "pointer" } : undefined}
             onClick={clickable ? handleRowClick : undefined}
           >
-            {shown.map((col) => {
+            {shown.map((col, colIdx) => {
               const value = r[alias(col.col)];
+              const isKeyCol = clickable && (String(col.col) === String(detail.keyColumn) || colIdx === 0);
+
               return (
                 <td
                   key={col.col}
@@ -2841,32 +2843,23 @@ if (box.tableMode === "graph") {
                       : undefined
                   }
                 >
-                  {fmtCell(value, col.fmt, locale)}
+                  {isKeyCol ? (
+                    <span className="po-toggle-wrap">
+                      <span className="po-arrow">{isSelected ? "▼" : "▶"}</span>
+                      <span className="po-link">{fmtCell(value, col.fmt, locale)}</span>
+                    </span>
+                  ) : (
+                    fmtCell(value, col.fmt, locale)
+                  )}
                 </td>
               );
             })}
           </tr>
 
           {isSelected && !popupMode && (
-            <tr className="pr-items-row">
-              <td colSpan={shown.length}>
-                <div className="pr-inline">
-                  <div className="pr-inline-header">
-                    <strong>
-                      {detail.title || "Details"} — {detailValue}
-                    </strong>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDetailItems(null);
-                        setDetailValue("");
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-
+            <tr className="pr-detail-row">
+              <td colSpan={shown.length} className="pr-detail-cell">
+                <div className="pr-detail-container">
                   {detailBody}
                 </div>
               </td>
@@ -2932,7 +2925,7 @@ if (box.tableMode === "graph") {
                   }
                 >
                   {i === 0
-                    ? "Total"
+                    ? `Total (${rows.length} ${rows.length === 1 ? "order" : "orders"})`
                     : isNum
                     ? fmtCell(
                         rows.reduce(

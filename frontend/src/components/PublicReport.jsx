@@ -471,7 +471,8 @@ function PublicBoxBody({
   }
 
   if (box.kind === "value") {
-    if (result?.error) {
+    const c = box.value || {};
+    if (result?.error && c.source !== "manual") {
       return (
         <div className="ph">
           <b>Formula problem</b>
@@ -480,33 +481,65 @@ function PublicBoxBody({
       );
     }
 
-    const v = result?.value;
+    let shown;
+    if (c.source === "manual") {
+      shown = c.manual || "";
+    } else {
+      const v = result?.value;
+      const isNum = v !== null && v !== undefined && v !== "" && typeof v === "number";
+      const isNumericStr = typeof v === "string" && v.trim() !== "" && !isNaN(v) && !isNaN(parseFloat(v));
+      shown = (v === null || v === undefined || v === "")
+        ? "—"
+        : (isNum || isNumericStr)
+          ? formatNumber(v, c.decimals, locale)
+          : String(v);
+    }
+
+    const textVal = String(shown || "");
+    const textLen = textVal.length;
+    const dynamicFontSize = c.fontSize || (textLen > 24 ? "15px" : textLen > 18 ? "18px" : textLen > 10 && isNaN(result?.value) ? "22px" : undefined);
 
     return (
       <>
         <div
           className="kpi"
-          style={{ color: box.value?.tone || "#1A2326" }}
+          style={{
+            color: c.tone || "#1A2326",
+            fontSize: dynamicFontSize,
+            lineHeight: 1.25,
+            wordBreak: "break-word",
+          }}
         >
-          {box.value?.prefix || ""}
-          {v === null || v === undefined
-            ? "—"
-            : formatNumber(
-              v,
-              box.value?.decimals,
-              locale
-            )}
-          {box.value?.suffix || ""}
-          {box.value?.unit && (
+          {c.prefix || ""}
+          {shown}
+          {c.suffix || ""}
+          {c.unit && (
             <span className="kpi-unit">
-              {box.value.unit}
+              {c.unit}
             </span>
           )}
         </div>
 
-        {box.value?.note && (
+        {c.delta && (
+          <div className={`kpi-delta ${c.deltaDir}`}>
+            {c.deltaDir === "up" ? "▲" : c.deltaDir === "down" ? "▼" : "■"} {c.delta}
+          </div>
+        )}
+
+        {c.showTrack && (
+          <div className="track">
+            <i
+              style={{
+                width: `${Math.max(0, Math.min(100, c.trackPct || 0))}%`,
+                background: c.tone || "#0D6E62",
+              }}
+            />
+          </div>
+        )}
+
+        {c.note && (
           <div className="kpi-note">
-            {box.value.note}
+            {c.note}
           </div>
         )}
       </>
@@ -716,6 +749,20 @@ function PublicBoxBody({
       </thead>
 
       <tbody>
+        {rows.length === 0 && (
+          <tr>
+            <td
+              colSpan={columns.length}
+              style={{
+                textAlign: "center",
+                color: "#64748B",
+                padding: "32px 16px",
+              }}
+            >
+              No records found for your account.
+            </td>
+          </tr>
+        )}
         {rows.map((row, rowIndex) => {
           const rowDetailValue = clickable
             ? row[clickable.col]

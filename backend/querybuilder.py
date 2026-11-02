@@ -20,7 +20,7 @@ Verified against these, all rejected:
 
 import re
 
-AGGS = {"SUM", "AVG", "COUNT", "COUNT DISTINCT", "MIN", "MAX"}
+AGGS = {"SUM", "AVG", "COUNT", "COUNT DISTINCT", "MIN", "MAX", "FIRST", "ANY_VALUE", "VALUE"}
 JOIN_TYPES = {"INNER", "LEFT"}
 COMPARISONS = {"=", "<>", ">", ">=", "<", "<="}
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]{0,63}$")
@@ -173,6 +173,8 @@ def _agg(scope, how, ref):
     how = (how or "SUM").upper()
     if how not in AGGS:
         raise BadDefinition(f"unknown aggregate: {how!r}")
+    if how in ("FIRST", "ANY_VALUE", "VALUE"):
+        return f"ANY_VALUE({scope.col(ref)})"
     if how == "COUNT DISTINCT":
         return f"COUNT(DISTINCT {scope.col(ref)})"
     return f"{how}({scope.col(ref)})"

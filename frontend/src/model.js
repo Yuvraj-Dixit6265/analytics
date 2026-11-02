@@ -20,7 +20,7 @@ export const FONTS = [
 ];
 export const ALIGNS = [["", "Auto"], ["left", "L"], ["center", "C"], ["right", "R"], ["justify", "J"]];
 export const CASES = [["", "Aa"], ["uppercase", "AA"], ["lowercase", "aa"], ["capitalize", "Aa·"]];
-export const AGGS = ["SUM", "AVG", "COUNT", "COUNT DISTINCT", "MIN", "MAX"];
+export const AGGS = ["SUM", "AVG", "COUNT", "COUNT DISTINCT", "FIRST", "MAX", "MIN"];
 export const JOIN_TYPES = [["INNER", "INNER JOIN"], ["LEFT", "LEFT JOIN"]];
 export const OPS = [["=", "="], ["<>", "≠"], [">", ">"], [">=", "≥"], ["<", "<"], ["<=", "≤"],
   ["contains", "contains"], ["starts", "starts with"], ["in", "in list"],

@@ -2117,18 +2117,28 @@ React.useEffect(() => {
     let shown;
     if (c.source === "manual") {
       shown = (
-        <Editable className="kpi-inline" value={c.manual} placeholder="0"
+        <Editable className="kpi-inline" value={c.manual} placeholder="Type text or value…"
           onChange={(v) => dispatch({ type: "set", target: "box", id: box.id, path: "value.manual", value: v })} />
       );
     } else if (result?.error) {
       return <Placeholder msg="Formula problem" sub={result.error} />;
     } else {
       const v = result?.value;
-      shown = v === null || v === undefined ? "—" : fmtNumber(v, c.decimals, locale);
+      const isNum = v !== null && v !== undefined && v !== "" && typeof v === "number";
+      const isNumericStr = typeof v === "string" && v.trim() !== "" && !isNaN(v) && !isNaN(parseFloat(v));
+      shown = v === null || v === undefined || v === "" ? "—"
+        : (isNum || isNumericStr)
+          ? fmtNumber(v, c.decimals, locale)
+          : String(v);
     }
+
+    const textVal = typeof shown === "object" ? "" : String(shown || "");
+    const textLen = textVal.length;
+    const dynamicFontSize = c.fontSize || (textLen > 24 ? "15px" : textLen > 16 ? "18px" : textLen > 10 && isNaN(result?.value) ? "22px" : undefined);
+
     return (
       <>
-        <div className="kpi" style={{ color: c.tone || "#1A2326" }}>
+        <div className="kpi" style={{ color: c.tone || "#1A2326", fontSize: dynamicFontSize }}>
           {c.prefix}{shown}{c.suffix}
           {c.unit && <span className="kpi-unit">{c.unit}</span>}
         </div>
@@ -4070,14 +4080,24 @@ function ValueData({ box, set }) {
   const cols = colOptions(state.catalog, box.src).map((x) => x.name);
   return (
     <>
-      <Group>Where the number comes from</Group>
+      <Group>Where the value comes from</Group>
       <Chips value={c.source} onChange={(v) => set("value.source", v)}
-        options={[["data", "One aggregate"], ["formula", "An Excel formula"],
-          ["manual", "A number I type"]]} />
+        options={[["data", "Database column"], ["formula", "An Excel formula"],
+          ["manual", "Text / value I type"]]} />
       {c.source === "data" && (
         <Row style={{ marginTop: 9 }}>
-          <Field label="Aggregate">
-            <Select value={c.agg} options={AGGS} onChange={(v) => set("value.agg", v)} />
+          <Field label="Show">
+            <Select value={c.agg || "FIRST"}
+              options={[
+                ["FIRST", "First / Text value"],
+                ["SUM", "Sum"],
+                ["AVG", "Average"],
+                ["COUNT", "Count"],
+                ["COUNT DISTINCT", "Unique count"],
+                ["MAX", "Maximum / Latest"],
+                ["MIN", "Minimum / Earliest"],
+              ]}
+              onChange={(v) => set("value.agg", v)} />
           </Field>
           <Field label="Of column">
             <Select value={c.column} options={cols} onChange={(v) => set("value.column", v)} />
@@ -4085,7 +4105,15 @@ function ValueData({ box, set }) {
         </Row>
       )}
       {c.source === "manual" && (
-        <Hint>Click the number in the box and type over it.</Hint>
+        <>
+          <Row style={{ marginTop: 9 }}>
+            <Field label="Text or value">
+              <Text value={c.manual || ""} placeholder="e.g. E Comp Technology"
+                onChange={(v) => set("value.manual", v)} />
+            </Field>
+          </Row>
+          <Hint>You can type vendor name, buyer, GSTIN, PAN or any custom text here or directly in the box.</Hint>
+        </>
       )}
       {c.source === "formula" && <FormulaBuilder box={box} c={c} set={set} />}
       <Group>Presentation</Group> 
@@ -4180,7 +4208,20 @@ function ValueFormat({ box, set }) {
             options={[["#1A2326", "Ink"], ["#0D6E62", "Oxide"], ["#3B5BA5", "Blue"],
               ["#96610A", "Amber"], ["#9E332B", "Iron"]]} />
         </Field>
-        <Field label="Decimals">
+        <Field label="Text size">
+          <Select value={c.fontSize || "auto"}
+            options={[
+              ["auto", "Auto"],
+              ["31px", "Large (31px)"],
+              ["22px", "Medium (22px)"],
+              ["17px", "Regular (17px)"],
+              ["14px", "Small (14px)"],
+            ]}
+            onChange={(v) => set("value.fontSize", v === "auto" ? "" : v)} />
+        </Field>
+      </Row>
+      <Row>
+        <Field label="Decimals (numbers)">
           <Select value={c.decimals} numeric options={[0, 1, 2]}
             onChange={(v) => set("value.decimals", v)} />
         </Field>

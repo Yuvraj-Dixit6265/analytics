@@ -474,9 +474,7 @@ function PublicBoxBody({
 }) {
   const { state } = useStore();
 
-  const [detailItems, setDetailItems] = React.useState(null);
-  const [detailValue, setDetailValue] = React.useState("");
-  const [detailLoading, setDetailLoading] = React.useState(false);
+  const [openDetails, setOpenDetails] = React.useState({});
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
 
@@ -789,25 +787,27 @@ function PublicBoxBody({
           const rowDetailValue = clickable
             ? row[clickable.col]
             : null;
-
-          const isSelected =
-            rowDetailValue != null &&
-            String(detailValue) ===
-            String(rowDetailValue) &&
-            detailItems !== null;
+          const clickedValue = rowDetailValue != null ? String(rowDetailValue) : "";
+          const isSelected = clickedValue !== "" && Boolean(openDetails[clickedValue]);
+          const currentDetail = clickedValue ? openDetails[clickedValue] : null;
+          const currentItems = currentDetail?.items || [];
+          const isCurrentLoading = currentDetail?.loading;
 
           const handleRowClick = async () => {
             if (!clickable || rowDetailValue == null) return;
-            const clickedValue = String(rowDetailValue);
-            if (isSelected) {
-              setDetailItems(null);
-              setDetailValue("");
+            if (openDetails[clickedValue]) {
+              setOpenDetails((prev) => {
+                const next = { ...prev };
+                delete next[clickedValue];
+                return next;
+              });
               return;
             }
 
-            setDetailValue(clickedValue);
-            setDetailItems([]);
-            setDetailLoading(true);
+            setOpenDetails((prev) => ({
+              ...prev,
+              [clickedValue]: { items: [], loading: true, error: "" },
+            }));
 
             try {
               const params = new URLSearchParams({
@@ -818,13 +818,13 @@ function PublicBoxBody({
                   .map((col) => col.col)
                   .filter(Boolean)
                   .join(","),
-                limit: String(detail.limit || 50),
+                limit: String(detail.limit || 100),
               });
 
               if (viewerToken) {
                 params.set("vt", viewerToken);
               }
-              const detailUrl = `${API_BASE}/r/${encodeURIComponent(key)}/${encodeURIComponent(token)}/detail?${params.toString()}`;
+              const detailUrl = `${API_BASE}/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`;
               const res = await fetch(detailUrl, {
                 headers: viewerHeaders,
               });
@@ -834,12 +834,16 @@ function PublicBoxBody({
               }
 
               const data = await res.json();
-              setDetailItems(data.rows || []);
+              setOpenDetails((prev) => ({
+                ...prev,
+                [clickedValue]: { items: data.rows || [], loading: false, error: "" },
+              }));
             } catch (err) {
               console.error("Could not load detail rows:", err);
-              setDetailItems([]);
-            } finally {
-              setDetailLoading(false);
+              setOpenDetails((prev) => ({
+                ...prev,
+                [clickedValue]: { items: [], loading: false, error: err.message },
+              }));
             }
           };
 
@@ -889,11 +893,11 @@ function PublicBoxBody({
                 <tr className="pr-detail-row">
                   <td colSpan={columns.length} className="pr-detail-cell">
                     <div className="pr-detail-container">
-                      {detailLoading ? (
+                      {isCurrentLoading ? (
                         <div className="pr-empty" style={{ padding: "20px", textAlign: "center", color: "#64748B" }}>
                           Loading line items...
                         </div>
-                      ) : detailItems.length === 0 ? (
+                      ) : currentItems.length === 0 ? (
                         <div className="pr-empty" style={{ padding: "20px", textAlign: "center", color: "#64748B" }}>
                           No line items found for this order.
                         </div>
@@ -919,7 +923,7 @@ function PublicBoxBody({
                             </thead>
 
                             <tbody>
-                              {detailItems.map(
+                              {currentItems.map(
                                 (
                                   item,
                                   itemIndex
@@ -972,13 +976,13 @@ function PublicBoxBody({
                                 )
                               )}
                             </tbody>
-                            {detailItems.length > 0 && (
+                            {currentItems.length > 0 && (
                               <tfoot>
                                 <tr>
                                   {(detail.columns || [])
                                     .filter((col) => col.col)
                                     .map((col, i) => {
-                                      const values = detailItems.map(
+                                      const values = currentItems.map(
                                         (item) => item[col.col] ?? item[col.col?.split(".").pop()]
                                       );
                                       const numericValues = values.filter(
@@ -996,7 +1000,7 @@ function PublicBoxBody({
                                             ? "Total"
                                             : isNumCol
                                             ? fmtCell(
-                                                detailItems.reduce(
+                                                currentItems.reduce(
                                                   (a, item) => a + (Number(item[col.col] ?? item[col.col?.split(".").pop()]) || 0),
                                                   0
                                                 ),

@@ -745,6 +745,7 @@ function Body({ box }) {
   const [detailValue, setDetailValue] = React.useState("");
   const [detailRow, setDetailRow] = React.useState(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
+  const [openDetails, setOpenDetails] = React.useState({});
   const [reportSearchTerm, setReportSearchTerm] = React.useState("");
   const [reportPage, setReportPage] = React.useState(1);
   const [selectedReportRecord, setSelectedReportRecord] = React.useState(null);
@@ -2567,64 +2568,104 @@ if (box.tableMode === "graph") {
       value: [...legacyAsSection(), newDetailSection(type)],
     });
 
-  const detailBody = detailItems === null ? null : (
+  const renderDetailBody = (items, loading) => (
     <>
-                  {detailLoading ? (
-                    <div className="pr-empty">
-                      Loading details...
-                    </div>
-                  ) : detailItems.length === 0 ? (
-                    <div className="pr-empty">
-                      No detail records found.
-                    </div>
-                  ) : (
-                    <div className="pr-items-table-wrap">
-                      <table className="rt pr-items-table">
-                        <thead>
-                          <tr>
-                            {(detail.columns || [])
-                              .filter((col) => col.col)
-                              .map((col) => (
-                                <th key={col.col}>
-                                  {col.label || col.col}
-                                </th>
-                              ))}
-                          </tr>
-                        </thead>
+      {loading ? (
+        <div className="pr-empty" style={{ padding: "20px", textAlign: "center", color: "#64748B" }}>
+          Loading line items...
+        </div>
+      ) : (items || []).length === 0 ? (
+        <div className="pr-empty" style={{ padding: "20px", textAlign: "center", color: "#64748B" }}>
+          No line items found for this order.
+        </div>
+      ) : (
+        <div className="pr-items-table-wrap">
+          <table className="rt pr-items-table">
+            <thead>
+              <tr>
+                {(detail.columns || [])
+                  .filter((col) => col.col)
+                  .map((col) => (
+                    <th key={col.col} className={col.align === "right" ? "num" : undefined}>
+                      {col.label || col.col}
+                    </th>
+                  ))}
+              </tr>
+            </thead>
 
-                        <tbody>
-                          {detailItems.map((item, itemIndex) => (
-                            <tr key={itemIndex}>
-                              {(detail.columns || [])
-                                .filter((col) => col.col)
-                                .map((col) => {
-                                  const value =
-                                    item[alias(col.col)] ??
-                                    item[col.col];
+            <tbody>
+              {(items || []).map((item, itemIndex) => (
+                <tr key={itemIndex}>
+                  {(detail.columns || [])
+                    .filter((col) => col.col)
+                    .map((col) => {
+                      const value =
+                        item[alias(col.col)] ??
+                        item[col.col];
 
-                                  return (
-                                    <td
-                                      key={col.col}
-                                      className={
-                                        col.align === "right"
-                                          ? "num"
-                                          : undefined
-                                      }
-                                    >
-                                      {fmtCell(
-                                        value,
-                                        col.fmt,
-                                        locale
-                                      )}
-                                    </td>
-                                  );
-                                })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                      return (
+                        <td
+                          key={col.col}
+                          className={
+                            col.align === "right"
+                              ? "num"
+                              : undefined
+                          }
+                        >
+                          {fmtCell(
+                            value,
+                            col.fmt,
+                            locale
+                          )}
+                        </td>
+                      );
+                    })}
+                </tr>
+              ))}
+            </tbody>
+            {(items || []).length > 0 && (
+              <tfoot>
+                <tr>
+                  {(detail.columns || [])
+                    .filter((col) => col.col)
+                    .map((col, i) => {
+                      const values = (items || []).map(
+                        (item) => item[alias(col.col)] ?? item[col.col]
+                      );
+                      const numericValues = values.filter(
+                        (val) => typeof val === "number" || (typeof val === "string" && val.trim() !== "" && !isNaN(val) && !isNaN(parseFloat(val)))
+                      );
+                      const isNumCol = col.align === "right" || (numericValues.length > 0 && numericValues.length === values.filter((val) => val != null && val !== "").length);
+                      const allCurrency = values.length > 0 && values.every((val) => val === "INR" || val === "USD" || val === "EUR");
+
+                      return (
+                        <td
+                          key={col.col}
+                          className={col.align === "right" || isNumCol ? "num" : undefined}
+                        >
+                          {i === 0
+                            ? "Total"
+                            : isNumCol
+                            ? fmtCell(
+                                (items || []).reduce(
+                                  (a, item) => a + (Number(item[alias(col.col)] ?? item[col.col]) || 0),
+                                  0
+                                ),
+                                col.fmt || "number",
+                                locale
+                              )
+                            : allCurrency
+                            ? values[0]
+                            : ""}
+                        </td>
+                      );
+                    })}
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      )}
     </>
   );
 
@@ -2746,24 +2787,94 @@ if (box.tableMode === "graph") {
         ? r[alias(clickable.col)]
         : null;
 
-      const isSelected =
-        rowDetailValue != null &&
-        String(detailValue) === String(rowDetailValue) &&
-        detailItems !== null;
+      const clickedValue = rowDetailValue != null ? String(rowDetailValue) : "";
+      const isSelected = popupMode
+        ? rowDetailValue != null && String(detailValue) === String(rowDetailValue) && detailItems !== null
+        : clickedValue !== "" && Boolean(openDetails[clickedValue]);
+      const currentDetail = clickedValue ? openDetails[clickedValue] : null;
+      const currentItems = currentDetail?.items || [];
+      const isCurrentLoading = currentDetail?.loading;
 
       const handleRowClick = async () => {
         if (!clickable || rowDetailValue == null) return;
-        const clickedValue = String(rowDetailValue);
-        if (isSelected) {
-          setDetailItems(null);
-          setDetailValue("");
+        if (popupMode) {
+          if (isSelected) {
+            setDetailItems(null);
+            setDetailValue("");
+            return;
+          }
+
+          setDetailValue(clickedValue);
+          setDetailRow(r);
+          setDetailItems([]);
+          setDetailLoading(true);
+
+          try {
+            const isPublished = window.location.pathname.includes("/r/");
+            let data;
+            if (isPublished) {
+              const [, publicPath] = window.location.pathname.split("/r/");
+              const [publicKey, publicToken] = publicPath.split("/");
+
+              const params = new URLSearchParams({
+                parentTable: box?.src?.base || "",
+                lookupColumn: detail.keyColumn,
+                value: clickedValue,
+                detailColumns: (detail.columns || [])
+                  .map((col) => col.col)
+                  .filter(Boolean)
+                  .join(","),
+                limit: String(detail.limit || 100),
+              });
+              const vt = new URLSearchParams(window.location.search).get("vt");
+              if (vt) params.set("vt", vt);
+
+              const res = await fetch(
+                `/api/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`
+              );
+
+              if (!res.ok) {
+                throw new Error("Could not load public detail rows");
+              }
+
+              data = await res.json();
+            } else {
+              data = await api.getDetailRows(
+                state.processKey,
+                box?.src?.base || "",
+                detail.keyColumn,
+                clickedValue,
+                (detail.columns || [])
+                  .map((col) => col.col)
+                  .filter(Boolean),
+                detail.limit || 100
+              );
+            }
+
+            setDetailItems(data.rows || []);
+          } catch (err) {
+            console.error("Could not load detail rows:", err);
+            setDetailItems([]);
+          } finally {
+            setDetailLoading(false);
+          }
           return;
         }
 
-        setDetailValue(clickedValue);
-        setDetailRow(r);
-        setDetailItems([]);
-        setDetailLoading(true);
+        // Inline accordion mode: multiple items can stay open simultaneously
+        if (openDetails[clickedValue]) {
+          setOpenDetails((prev) => {
+            const next = { ...prev };
+            delete next[clickedValue];
+            return next;
+          });
+          return;
+        }
+
+        setOpenDetails((prev) => ({
+          ...prev,
+          [clickedValue]: { items: [], loading: true, error: "" },
+        }));
 
         try {
           const isPublished = window.location.pathname.includes("/r/");
@@ -2780,7 +2891,7 @@ if (box.tableMode === "graph") {
                 .map((col) => col.col)
                 .filter(Boolean)
                 .join(","),
-              limit: String(detail.limit || 50),
+              limit: String(detail.limit || 100),
             });
             const vt = new URLSearchParams(window.location.search).get("vt");
             if (vt) params.set("vt", vt);
@@ -2803,16 +2914,20 @@ if (box.tableMode === "graph") {
               (detail.columns || [])
                 .map((col) => col.col)
                 .filter(Boolean),
-              detail.limit || 50
+              detail.limit || 100
             );
           }
 
-          setDetailItems(data.rows || []);
+          setOpenDetails((prev) => ({
+            ...prev,
+            [clickedValue]: { items: data.rows || [], loading: false, error: "" },
+          }));
         } catch (err) {
           console.error("Could not load detail rows:", err);
-          setDetailItems([]);
-        } finally {
-          setDetailLoading(false);
+          setOpenDetails((prev) => ({
+            ...prev,
+            [clickedValue]: { items: [], loading: false, error: err.message },
+          }));
         }
       };
 
@@ -2860,7 +2975,7 @@ if (box.tableMode === "graph") {
             <tr className="pr-detail-row">
               <td colSpan={shown.length} className="pr-detail-cell">
                 <div className="pr-detail-container">
-                  {detailBody}
+                  {renderDetailBody(currentItems, isCurrentLoading)}
                 </div>
               </td>
             </tr>

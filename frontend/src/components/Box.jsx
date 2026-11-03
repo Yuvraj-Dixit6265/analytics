@@ -3141,7 +3141,7 @@ if (box.tableMode === "graph") {
                   </button>
                 </div>
 
-                {detailBody}
+                {renderDetailBody(detailItems, detailLoading, detailValue)}
 
                 {isDesign && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>

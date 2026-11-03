@@ -874,7 +874,7 @@ function PublicBoxBody({
                     >
                       {isKeyCol ? (
                         <span className="po-toggle-wrap">
-                          <span className="po-arrow">{isSelected ? "▼" : "▶"}</span>
+                          <span className="po-arrow-badge">{isSelected ? "▼" : "▶"}</span>
                           <span className="po-link">{fmtCell(value, col.fmt, locale)}</span>
                         </span>
                       ) : (
@@ -894,112 +894,140 @@ function PublicBoxBody({
                   <td colSpan={columns.length} className="pr-detail-cell">
                     <div className="pr-detail-container">
                       {isCurrentLoading ? (
-                        <div className="pr-empty" style={{ padding: "20px", textAlign: "center", color: "#64748B" }}>
-                          Loading line items...
+                        <div className="pr-detail-loading">
+                          <div className="pr-spinner" />
+                          <span>Loading line items...</span>
                         </div>
                       ) : currentItems.length === 0 ? (
-                        <div className="pr-empty" style={{ padding: "20px", textAlign: "center", color: "#64748B" }}>
+                        <div className="pr-empty" style={{ padding: "24px", textAlign: "center", color: "#64748B" }}>
                           No line items found for this order.
                         </div>
                       ) : (
-                        <div className="pr-items-table-wrap">
-                          <table className="rt pr-items-table">
-                            <thead>
-                              <tr>
-                                {(detail.columns || [])
-                                  .filter(
-                                    (col) => col.col
-                                  )
-                                  .map((col) => (
-                                    <th
-                                      key={col.col}
-                                      className={col.align === "right" ? "num" : undefined}
-                                    >
-                                      {col.label ||
-                                        col.col}
-                                    </th>
-                                  ))}
-                              </tr>
-                            </thead>
+                        <div className="pr-items-card">
+                          <div className="pr-detail-card-header">
+                            <div className="pr-detail-title-pill">
+                              <span className="pr-detail-icon-box">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                                  <line x1="12" y1="22.08" x2="12" y2="12" />
+                                </svg>
+                              </span>
+                              <span className="pr-detail-title-text">Line Items</span>
+                              <span className="pr-detail-count-badge">
+                                {currentItems.length} {currentItems.length === 1 ? "item" : "items"}
+                              </span>
+                            </div>
+                            {clickedValue ? <div className="pr-detail-po-tag">PO #{clickedValue}</div> : null}
+                          </div>
 
-                            <tbody>
-                              {currentItems.map(
-                                (
-                                  item,
-                                  itemIndex
-                                ) => (
-                                  <tr
-                                    key={
-                                      itemIndex
-                                    }
-                                  >
-                                    {(detail.columns || [])
-                                      .filter(
-                                        (col) =>
-                                          col.col
-                                      )
-                                      .map(
-                                        (col) => {
-                                          const value =
-                                            item[
-                                            col.col
-                                            ] ??
-                                            item[
-                                            col.col
-                                              ?.split(
-                                                "."
-                                              )
-                                              .pop()
-                                            ];
-
-                                          return (
-                                            <td
-                                              key={
-                                                col.col
-                                              }
-                                              className={
-                                                col.align === "right"
-                                                  ? "num"
-                                                  : undefined
-                                              }
-                                            >
-                                              {fmtCell(
-                                                value,
-                                                col.fmt,
-                                                locale
-                                              )}
-                                            </td>
-                                          );
-                                        }
-                                      )}
-                                  </tr>
-                                )
-                              )}
-                            </tbody>
-                            {currentItems.length > 0 && (
-                              <tfoot>
+                          <div className="pr-items-table-wrap">
+                            <table className="rt pr-items-table">
+                              <thead>
                                 <tr>
                                   {(detail.columns || [])
-                                    .filter((col) => col.col)
-                                    .map((col, i) => {
-                                      const values = currentItems.map(
-                                        (item) => item[col.col] ?? item[col.col?.split(".").pop()]
-                                      );
-                                      const numericValues = values.filter(
-                                        (val) => typeof val === "number" || (typeof val === "string" && val.trim() !== "" && !isNaN(val) && !isNaN(parseFloat(val)))
-                                      );
-                                      const isNumCol = col.align === "right" || (numericValues.length > 0 && numericValues.length === values.filter((val) => val != null && val !== "").length);
-                                      const allCurrency = values.length > 0 && values.every((val) => val === "INR" || val === "USD" || val === "EUR");
+                                    .filter(
+                                      (col) => col.col
+                                    )
+                                    .map((col) => (
+                                      <th
+                                        key={col.col}
+                                        className={col.align === "right" ? "num" : undefined}
+                                      >
+                                        {col.label ||
+                                          col.col}
+                                      </th>
+                                    ))}
+                                </tr>
+                              </thead>
 
-                                      return (
-                                        <td
-                                          key={col.col}
-                                          className={col.align === "right" || isNumCol ? "num" : undefined}
-                                        >
-                                          {i === 0
-                                            ? "Total"
-                                            : isNumCol
-                                            ? fmtCell(
+                              <tbody>
+                                {currentItems.map(
+                                  (
+                                    item,
+                                    itemIndex
+                                  ) => (
+                                    <tr
+                                      key={
+                                        itemIndex
+                                      }
+                                    >
+                                      {(detail.columns || [])
+                                        .filter(
+                                          (col) =>
+                                            col.col
+                                        )
+                                        .map(
+                                          (col) => {
+                                            const value =
+                                              item[
+                                              col.col
+                                              ] ??
+                                              item[
+                                              col.col
+                                                ?.split(
+                                                  "."
+                                                )
+                                                .pop()
+                                              ];
+
+                                            return (
+                                              <td
+                                                key={
+                                                  col.col
+                                                }
+                                                className={
+                                                  col.align === "right"
+                                                    ? "num"
+                                                    : undefined
+                                                }
+                                              >
+                                                {fmtCell(
+                                                  value,
+                                                  col.fmt,
+                                                  locale
+                                                )}
+                                              </td>
+                                            );
+                                          }
+                                        )}
+                                    </tr>
+                                  )
+                                )}
+                              </tbody>
+                              {currentItems.length > 0 && (
+                                <tfoot>
+                                  <tr>
+                                    {(detail.columns || [])
+                                      .filter((col) => col.col)
+                                      .map((col, i) => {
+                                        const values = currentItems.map(
+                                          (item) => item[col.col] ?? item[col.col?.split(".").pop()]
+                                        );
+                                        const numericValues = values.filter(
+                                          (val) => typeof val === "number" || (typeof val === "string" && val.trim() !== "" && !isNaN(val) && !isNaN(parseFloat(val)))
+                                        );
+                                        const isNumCol = col.align === "right" || (numericValues.length > 0 && numericValues.length === values.filter((val) => val != null && val !== "").length);
+                                        const colKey = String(col.col || "").toLowerCase();
+                                        const colLbl = String(col.label || "").toLowerCase();
+                                        const isIdOrCode = /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colKey) || /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colLbl);
+                                        const canSum = isNumCol && !isIdOrCode;
+                                        const allCurrency = values.length > 0 && values.every((val) => val === "INR" || val === "USD" || val === "EUR");
+
+                                        return (
+                                          <td
+                                            key={col.col}
+                                            className={col.align === "right" || isNumCol ? "num" : undefined}
+                                          >
+                                            {i === 0 ? (
+                                              <span className="pr-total-badge">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}>
+                                                  <polyline points="20 6 9 17 4 12" />
+                                                </svg>
+                                                Total
+                                              </span>
+                                            ) : canSum ? (
+                                              fmtCell(
                                                 currentItems.reduce(
                                                   (a, item) => a + (Number(item[col.col] ?? item[col.col?.split(".").pop()]) || 0),
                                                   0
@@ -1007,16 +1035,19 @@ function PublicBoxBody({
                                                 col.fmt || "number",
                                                 locale
                                               )
-                                            : allCurrency
-                                            ? values[0]
-                                            : ""}
-                                        </td>
-                                      );
-                                    })}
-                                </tr>
-                              </tfoot>
-                            )}
-                          </table>
+                                            ) : allCurrency ? (
+                                              values[0]
+                                            ) : (
+                                              ""
+                                            )}
+                                          </td>
+                                        );
+                                      })}
+                                  </tr>
+                                </tfoot>
+                              )}
+                            </table>
+                          </div>
                         </div>
                       )}
                     </div>

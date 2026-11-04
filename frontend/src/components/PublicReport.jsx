@@ -252,6 +252,7 @@ function PublicReportInner({ slug }) {
 }
 
 function PublicCanvas({ doc }) {
+  const { state, dispatch } = useStore();
   const visibleSections = (doc.sections || []).filter(
     (section) => section.visible !== false
   );
@@ -282,6 +283,37 @@ function PublicCanvas({ doc }) {
           <div className="rep-subtitle">
             {doc.desc}
           </div>
+        )}
+      </div>
+
+      <div className="pr-report-search-bar">
+        <div className="fbar-search-inner">
+          <svg className="fbar-search-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            className="fbar-search-input"
+            placeholder="Search this report (PO number, date, amount, vendor, or details)..."
+            value={state.searchTerm || ""}
+            onChange={(e) => dispatch({ type: "searchTerm", value: e.target.value })}
+          />
+          {state.searchTerm && (
+            <button
+              type="button"
+              className="fbar-search-clear"
+              onClick={() => dispatch({ type: "searchTerm", value: "" })}
+              title="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        {state.searchTerm && (
+          <span className="pr-search-active-pill">
+            Filtering by "{state.searchTerm}"
+          </span>
         )}
       </div>
 
@@ -734,13 +766,8 @@ function PublicBoxBody({
   const rows = result?.rows || [];
   const detail = box.table?.detail || {};
 
-  if (!columns.length) {
-    return (
-      <div className="empty">
-        No columns selected.
-      </div>
-    );
-  }
+  const [tableSearch, setTableSearch] = React.useState("");
+  const effectiveSearch = (tableSearch || state.searchTerm || "").trim().toLowerCase();
 
   const clickable =
     detail.enabled &&
@@ -750,8 +777,73 @@ function PublicBoxBody({
         String(col.col) === String(detail.keyColumn)
     );
 
+  const filteredRows = React.useMemo(() => {
+    if (!effectiveSearch) return rows;
+    return rows.filter((r) => {
+      const matchCol = columns.some((col) => {
+        const val = r[col.col] ?? r[col.col?.split(".").pop()];
+        return String(val ?? "").toLowerCase().includes(effectiveSearch);
+      });
+      if (matchCol) return true;
+
+      const rowDetailValue = clickable ? r[clickable.col] : null;
+      if (rowDetailValue != null && openDetails[String(rowDetailValue)]?.items) {
+        const items = openDetails[String(rowDetailValue)].items;
+        return items.some((item) =>
+          Object.values(item).some((val) =>
+            String(val ?? "").toLowerCase().includes(effectiveSearch)
+          )
+        );
+      }
+      return false;
+    });
+  }, [rows, effectiveSearch, columns, openDetails, clickable]);
+
+  if (!columns.length) {
+    return (
+      <div className="empty">
+        No columns selected.
+      </div>
+    );
+  }
+
   return (
     <>
+      <div className="table-search-toolbar">
+        <div className="table-search-input-wrap">
+          <svg className="table-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            className="table-search-input"
+            placeholder="Search records by PO#, date, amount, or details..."
+            value={tableSearch}
+            onChange={(e) => setTableSearch(e.target.value)}
+          />
+          {tableSearch && (
+            <button
+              type="button"
+              className="table-search-clear"
+              onClick={() => setTableSearch("")}
+              title="Clear table search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        {effectiveSearch ? (
+          <span className="table-search-count">
+            {filteredRows.length} of {rows.length} {rows.length === 1 ? "record" : "records"}
+          </span>
+        ) : rows.length > 0 ? (
+          <span style={{ fontSize: "12px", color: "#64748B" }}>
+            {rows.length} {rows.length === 1 ? "record" : "records"}
+          </span>
+        ) : null}
+      </div>
+
       <table className="rt">
       <thead>
         <tr>
@@ -783,7 +875,26 @@ function PublicBoxBody({
             </td>
           </tr>
         )}
-        {rows.map((row, rowIndex) => {
+        {rows.length > 0 && filteredRows.length === 0 && (
+          <tr className="empty-search-row">
+            <td colSpan={columns.length}>
+              <div style={{ color: "#64748B", marginBottom: "8px" }}>
+                No records found matching "{effectiveSearch}"
+              </div>
+              <button
+                type="button"
+                className="table-search-reset-btn"
+                onClick={() => {
+                  setTableSearch("");
+                  dispatch({ type: "searchTerm", value: "" });
+                }}
+              >
+                Clear Search
+              </button>
+            </td>
+          </tr>
+        )}
+        {filteredRows.map((row, rowIndex) => {
           const rowDetailValue = clickable
             ? row[clickable.col]
             : null;
@@ -1058,11 +1169,11 @@ function PublicBoxBody({
           );
         })}
       </tbody>
-      {rows.length > 0 && (
+      {filteredRows.length > 0 && (
         <tfoot>
           <tr>
             {columns.map((col, i) => {
-              const values = rows.map(
+              const values = filteredRows.map(
                 (r) => r[col.col] ?? r[col.col?.split(".").pop()]
               );
               const numericValues = values.filter(
@@ -1078,6 +1189,10 @@ function PublicBoxBody({
                 (numericValues.length > 0 &&
                   numericValues.length ===
                     values.filter((val) => val != null && val !== "").length);
+              const colKey = String(col.col || "").toLowerCase();
+              const colLbl = String(col.label || "").toLowerCase();
+              const isIdOrCode = /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colKey) || /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colLbl);
+              const canSum = isNumCol && !isIdOrCode;
               const allCurrency =
                 values.length > 0 &&
                 values.every(
@@ -1093,10 +1208,10 @@ function PublicBoxBody({
                   }
                 >
                   {i === 0
-                    ? `Total (${rows.length} ${rows.length === 1 ? "order" : "orders"})`
-                    : isNumCol
+                    ? `Total (${filteredRows.length} ${filteredRows.length === 1 ? "order" : "orders"})`
+                    : canSum
                     ? fmtCell(
-                        rows.reduce(
+                        filteredRows.reduce(
                           (a, r) =>
                             a +
                             (Number(

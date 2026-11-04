@@ -27,6 +27,7 @@ export const initialState = {
   connections: [],
   reports: [],
   filterState: {},
+  searchTerm: "",
   results: {},
   published: null,
   busy: false,
@@ -111,9 +112,11 @@ export function reducer(state, a) {
     case "cancelDel":  return { ...state, pendingDel: null };
 
     /* ---- filter values (not part of the definition) ---- */
+    case "searchTerm":
+      return { ...state, searchTerm: a.value || "" };
     case "filterValue":
       return { ...state, filterState: { ...state.filterState, [a.id]: a.value } };
-    case "clearFilters": return { ...state, filterState: {} };
+    case "clearFilters": return { ...state, filterState: {}, searchTerm: "" };
 
     /* ---- generic path write ---- */
     case "set": {

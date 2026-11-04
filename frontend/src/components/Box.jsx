@@ -2528,11 +2528,36 @@ if (box.tableMode === "graph") {
     );
 
   const rows = result?.rows || [];
+  const [tableSearch, setTableSearch] = React.useState("");
+  const effectiveSearch = (tableSearch || state.searchTerm || "").trim().toLowerCase();
   const [msg, sub] = stateNote(box, state.catalog);
   const alias = (ref) => ref.replace(/\./g, "__");
 
   /* The clicked row's details open in a popup (turn off in Row Detail List). */
   const detail = c.detail || {};
+
+  const filteredRows = React.useMemo(() => {
+    if (!effectiveSearch) return rows;
+    return rows.filter((r) => {
+      const matchCol = shown.some((col) => {
+        const val = r[alias(col.col)] ?? r[col.col];
+        return String(val ?? "").toLowerCase().includes(effectiveSearch);
+      });
+      if (matchCol) return true;
+
+      const detailKey = detail?.keyColumn ? r[alias(detail.keyColumn)] ?? r[detail.keyColumn] : null;
+      if (detailKey != null && openDetails[String(detailKey)]?.items) {
+        const items = openDetails[String(detailKey)].items;
+        return items.some((item) =>
+          Object.values(item).some((val) =>
+            String(val ?? "").toLowerCase().includes(effectiveSearch)
+          )
+        );
+      }
+      return false;
+    });
+  }, [rows, effectiveSearch, shown, openDetails, detail?.keyColumn]);
+
   const popupMode = detail.popup !== false;
   const closeDetail = () => {
     setDetailItems(null);
@@ -2702,6 +2727,40 @@ if (box.tableMode === "graph") {
 
     return (
     <div className="rt-table-wrap">
+      <div className="table-search-toolbar">
+        <div className="table-search-input-wrap">
+          <svg className="table-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            className="table-search-input"
+            placeholder="Search records by PO#, date, amount, or details..."
+            value={tableSearch}
+            onChange={(e) => setTableSearch(e.target.value)}
+          />
+          {tableSearch && (
+            <button
+              type="button"
+              className="table-search-clear"
+              onClick={() => setTableSearch("")}
+              title="Clear table search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+        {effectiveSearch ? (
+          <span className="table-search-count">
+            {filteredRows.length} of {rows.length} {rows.length === 1 ? "record" : "records"}
+          </span>
+        ) : rows.length > 0 ? (
+          <span style={{ fontSize: "12px", color: "#64748B" }}>
+            {rows.length} {rows.length === 1 ? "record" : "records"}
+          </span>
+        ) : null}
+      </div>
       <table className="rt">
         <thead>
         <tr>
@@ -2797,8 +2856,8 @@ if (box.tableMode === "graph") {
           </thead>
 
       <tbody>
-  {rows.length ? (
-    (window.location.pathname.includes("/r/") || !c.limit || c.limit === 0 ? rows : rows.slice(0, c.limit)).map((r, i) => {
+  {filteredRows.length ? (
+    (window.location.pathname.includes("/r/") || !c.limit || c.limit === 0 ? filteredRows : filteredRows.slice(0, c.limit)).map((r, i) => {
       const detail = c.detail || {};
       console.log("DETAIL USED:", {
         baseTable: box?.src?.base || "",
@@ -3014,6 +3073,24 @@ if (box.tableMode === "graph") {
         </React.Fragment>
       );
     })
+  ) : rows.length > 0 ? (
+    <tr className="empty-search-row">
+      <td colSpan={shown.length}>
+        <div style={{ color: "#64748B", marginBottom: "8px" }}>
+          No records found matching "{effectiveSearch}"
+        </div>
+        <button
+          type="button"
+          className="table-search-reset-btn"
+          onClick={() => {
+            setTableSearch("");
+            dispatch({ type: "searchTerm", value: "" });
+          }}
+        >
+          Clear Search
+        </button>
+      </td>
+    </tr>
   ) : window.location.pathname.includes("/r/") ? (
     <tr>
       <td
@@ -3056,12 +3133,16 @@ if (box.tableMode === "graph") {
   )}
 </tbody>
 
-            {c.totals && rows.length > 0 && (
+      {c.totals && filteredRows.length > 0 && (
         <tfoot>
           <tr>
             {shown.map((col, i) => {
               const isNum =
-                typeof rows[0][alias(col.col)] === "number";
+                typeof filteredRows[0][alias(col.col)] === "number";
+              const colKey = String(col.col || "").toLowerCase();
+              const colLbl = String(col.label || "").toLowerCase();
+              const isIdOrCode = /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colKey) || /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colLbl);
+              const canSum = isNum && !isIdOrCode;
 
               return (
                 <td
@@ -3071,10 +3152,10 @@ if (box.tableMode === "graph") {
                   }
                 >
                   {i === 0
-                    ? `Total (${rows.length} ${rows.length === 1 ? "order" : "orders"})`
-                    : isNum
+                    ? `Total (${filteredRows.length} ${filteredRows.length === 1 ? "order" : "orders"})`
+                    : canSum
                     ? fmtCell(
-                        rows.reduce(
+                        filteredRows.reduce(
                           (a, r) =>
                             a + (+r[alias(col.col)] || 0),
                           0

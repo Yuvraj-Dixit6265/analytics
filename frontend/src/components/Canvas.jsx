@@ -272,12 +272,37 @@ function FilterBar() {
         </div>
       )}
       {state.doc.filters.map((f, i) => <Filter key={f.id} filter={f} index={i} />)}
-      {(design || Object.keys(state.filterState).length > 0) && (
+      <div className="fbar-search-chip">
+        <div className="fbar-search-inner">
+          <svg className="fbar-search-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            className="fbar-search-input"
+            placeholder="Search report details (PO#, date, amount, vendor...)..."
+            value={state.searchTerm || ""}
+            onChange={(e) => dispatch({ type: "searchTerm", value: e.target.value })}
+          />
+          {state.searchTerm && (
+            <button
+              type="button"
+              className="fbar-search-clear"
+              onClick={() => dispatch({ type: "searchTerm", value: "" })}
+              title="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      </div>
+      {(design || Object.keys(state.filterState).length > 0 || state.searchTerm) && (
         <div className="fbar-add">
           {design && (
             <button className="add" onClick={() => dispatch({ type: "addFilter" })}>+ Filter</button>
           )}
-          {Object.keys(state.filterState).length > 0 && (
+          {(Object.keys(state.filterState).length > 0 || state.searchTerm) && (
             <button className="add" onClick={() => dispatch({ type: "clearFilters" })}>Clear</button>
           )}
         </div>

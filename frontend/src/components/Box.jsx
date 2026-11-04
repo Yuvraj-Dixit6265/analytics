@@ -241,6 +241,30 @@ const popupPill = {
   color: "#6B4E00",
 };
 
+export function formatDetailHeading(title, value, fallback = "Details") {
+  const rawTitle = String(title || "").trim();
+  const rawVal = String(value || "").trim();
+
+  const cleanTitle = rawTitle.replace(/^[\s\-—–]+|[\s\-—–]+$/g, "").trim();
+  const cleanVal = rawVal.replace(/^[\s\-—–]+/, "").trim();
+
+  const isGeneric =
+    !cleanTitle ||
+    cleanTitle.toLowerCase() === "details" ||
+    cleanTitle.toLowerCase() === "record details";
+
+  let result = "";
+  if (isGeneric) {
+    result = cleanVal || fallback;
+  } else if (cleanTitle && cleanVal) {
+    result = `${cleanTitle} — ${cleanVal}`;
+  } else {
+    result = cleanTitle || cleanVal || fallback;
+  }
+
+  return result.replace(/^[\s\-—–]+/, "").trim() || fallback;
+}
+
 function DetailPopup({
   box,
   detail,
@@ -551,7 +575,7 @@ function DetailPopup({
 
       {!hasHeader && (
         <h3 style={{ margin: "0 40px 16px 0" }}>
-          {detail.title || "Details"} — {detailValue}
+          {formatDetailHeading(detail.title, detailValue)}
         </h3>
       )}
 
@@ -1686,7 +1710,7 @@ React.useEffect(() => {
           >
             <div className="report-view-modal" role="dialog" aria-modal="true">
               <div className="report-view-modal-header">
-                <h3>{config.detailTitle || "Record Details"}</h3>
+                <h3>{formatDetailHeading(config.detailTitle, "", "Record Details")}</h3>
                 <button
                   className="xbtn"
                   onClick={() => setSelectedReportRecord(null)}
@@ -3210,7 +3234,7 @@ if (box.tableMode === "graph") {
               <>
                 <div className="report-view-modal-header">
                   <h3>
-                    {detail.title || "Details"} — {detailValue}
+                    {formatDetailHeading(detail.title, detailValue)}
                   </h3>
                   <button
                     type="button"
@@ -5168,8 +5192,8 @@ const addAllColumns = () => {
 
   <Field label="Detail title">
     <Text
-      value={c.detail.title || "Details"}
-      placeholder="Details"
+      value={c.detail.title ?? ""}
+      placeholder="Details (optional)"
       onChange={(v) =>
         set("table.detail.title", v)
       }

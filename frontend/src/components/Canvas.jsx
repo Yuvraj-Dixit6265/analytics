@@ -48,11 +48,11 @@ function Editable({
       onKeyDown={
         editable
           ? (e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                e.currentTarget.blur();
-              }
+            if (e.key === "Enter") {
+              e.preventDefault();
+              e.currentTarget.blur();
             }
+          }
           : undefined
       }
     />
@@ -96,14 +96,14 @@ export default function Canvas() {
   const { state, dispatch } = useStore();
   const design = state.mode === "design";
   return (
-  <div className="sheet" onMouseDown={() => dispatch({ type: "select", sel: null })}>
-    <ReportName />
-    <FilterBar />
+    <div className="sheet" onMouseDown={() => dispatch({ type: "select", sel: null })}>
+      <ReportName />
+      <FilterBar />
 
 
-    {state.doc.sections.map((sc, i) => (
-      <Section key={sc.id} section={sc} index={i + 1} />
-    ))}
+      {state.doc.sections.map((sc, i) => (
+        <Section key={sc.id} section={sc} index={i + 1} />
+      ))}
       {design && (
         <div className="addbar">
           <button className="add big" onClick={() => dispatch({ type: "addSection" })}>
@@ -149,14 +149,14 @@ function ReportName() {
           ))}
         </div>
       )}
-        <Editable
-          className="rep-name"
-          value={state.doc.name}
-          placeholder="Name this report"
-          editable={design}
-          style={styleObj(st, { align: true })}
-          onChange={(v) => set("name", v)}
-        />
+      <Editable
+        className="rep-name"
+        value={state.doc.name}
+        placeholder="Name this report"
+        editable={design}
+        style={styleObj(st, { align: true })}
+        onChange={(v) => set("name", v)}
+      />
       {selected && state.cfgOpen && design && (
         <div className="cfg" style={{ textAlign: "left" }} onMouseDown={(e) => e.stopPropagation()}>
           <FormatPanel label="Report name" style={st} onSet={(k, v) => set(`nameStyle.${k}`, v)} />
@@ -227,11 +227,11 @@ function SectionNavigation() {
   const { state } = useStore();
 
   const sections = (state.doc.sections || [])
-  .filter((section) => section.visible !== false)
-  .filter((section) => {
-    const name = String(section.name || "").trim();
-    return !/^untitled section$/i.test(name);
-  });
+    .filter((section) => section.visible !== false)
+    .filter((section) => {
+      const name = String(section.name || "").trim();
+      return !/^untitled section$/i.test(name);
+    });
 
   if (!sections.length) return null;
 
@@ -281,7 +281,7 @@ function FilterBar() {
           <input
             type="text"
             className="fbar-search-input"
-            placeholder="Search report details (PO#, date, amount, vendor...)..."
+            placeholder="Search report details"
             value={state.searchTerm || ""}
             onChange={(e) => dispatch({ type: "searchTerm", value: e.target.value })}
           />
@@ -325,8 +325,10 @@ function Filter({ filter: f, index }) {
   const set = (path, value) => dispatch({ type: "set", target: "filter", id: f.id, path, value });
 
 
-  const labelStyle = { ...styleObj(fst, { bg: true }),
-    ...(lw ? { flex: `0 0 ${lw}px`, width: `${lw}px`, maxWidth: "none" } : {}) };
+  const labelStyle = {
+    ...styleObj(fst, { bg: true }),
+    ...(lw ? { flex: `0 0 ${lw}px`, width: `${lw}px`, maxWidth: "none" } : {})
+  };
 
   return (
     <div className={`fchip w-${f.width || "auto"}${wide ? " w-wide" : ""}${selected ? " sel" : ""}`}
@@ -352,14 +354,14 @@ function Filter({ filter: f, index }) {
       )}
 
       <div className={`fbody pos-${pos}`} style={{ gap: `${gap}px` }}>
-          <Editable
-            className={`fname${pos === "hidden" ? " lbl-hidden" : ""}`}
-            value={f.label}
-            placeholder="Label"
-            editable={design}
-            style={labelStyle}
-            onChange={(v) => set("label", v)}
-          />
+        <Editable
+          className={`fname${pos === "hidden" ? " lbl-hidden" : ""}`}
+          value={f.label}
+          placeholder="Label"
+          editable={design}
+          style={labelStyle}
+          onChange={(v) => set("label", v)}
+        />
         {f.colon && pos !== "hidden" && (
           <span className="fcolon" style={styleObj(fst, { bg: true })}>:</span>
         )}
@@ -553,81 +555,81 @@ function Control({ filter: f }) {
     case "date":
       return <input type="date" value={value || ""} onChange={(e) => set(e.target.value)} />;
     case "daterange": {
-  const o = value && typeof value === "object" ? value : {};
+      const o = value && typeof value === "object" ? value : {};
 
-  const preset =
-    o.preset ||
-    (o.from && o.to ? "custom" : "");
+      const preset =
+        o.preset ||
+        (o.from && o.to ? "custom" : "");
 
-  const applyPreset = (nextPreset) => {
-    if (nextPreset === "custom") {
-      set({
-        preset: "custom",
-        from: o.from || "",
-        to: o.to || "",
-      });
-      return;
+      const applyPreset = (nextPreset) => {
+        if (nextPreset === "custom") {
+          set({
+            preset: "custom",
+            from: o.from || "",
+            to: o.to || "",
+          });
+          return;
+        }
+
+        const range = datePresetRange(nextPreset);
+
+        set({
+          preset: nextPreset,
+          from: range.from || "",
+          to: range.to || "",
+        });
+      };
+
+      return (
+        <div className="date-range-control">
+          <select
+            value={preset}
+            onChange={(e) => applyPreset(e.target.value)}
+          >
+            <option value="">Select date range</option>
+            <option value="today">Today</option>
+            <option value="this-week">This week</option>
+            <option value="this-month">This Month</option>
+            <option value="this-quarter">This quarter</option>
+            <option value="this-year">This Year</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="last-week">Last Week</option>
+            <option value="last-month">Last Month</option>
+            <option value="last-quarter">Last Quarter</option>
+            <option value="last-year">Last Year</option>
+            <option value="custom">Custom</option>
+          </select>
+
+          {preset === "custom" && (
+            <span className="pair">
+              <input
+                type="date"
+                value={o.from || ""}
+                onChange={(e) =>
+                  set({
+                    ...o,
+                    preset: "custom",
+                    from: e.target.value,
+                  })
+                }
+              />
+
+              <input
+                type="date"
+                value={o.to || ""}
+                onChange={(e) =>
+                  set({
+                    ...o,
+                    preset: "custom",
+                    to: e.target.value,
+                  })
+                }
+              />
+            </span>
+          )}
+        </div>
+      );
     }
-
-    const range = datePresetRange(nextPreset);
-
-    set({
-      preset: nextPreset,
-      from: range.from || "",
-      to: range.to || "",
-    });
-  };
-
-  return (
-    <div className="date-range-control">
-      <select
-        value={preset}
-        onChange={(e) => applyPreset(e.target.value)}
-      >
-        <option value="">Select date range</option>
-        <option value="today">Today</option>
-        <option value="this-week">This week</option>
-        <option value="this-month">This Month</option>
-        <option value="this-quarter">This quarter</option>
-        <option value="this-year">This Year</option>
-        <option value="yesterday">Yesterday</option>
-        <option value="last-week">Last Week</option>
-        <option value="last-month">Last Month</option>
-        <option value="last-quarter">Last Quarter</option>
-        <option value="last-year">Last Year</option>
-        <option value="custom">Custom</option>
-      </select>
-
-      {preset === "custom" && (
-        <span className="pair">
-          <input
-            type="date"
-            value={o.from || ""}
-            onChange={(e) =>
-              set({
-                ...o,
-                preset: "custom",
-                from: e.target.value,
-              })
-            }
-          />
-
-          <input
-            type="date"
-            value={o.to || ""}
-            onChange={(e) =>
-              set({
-                ...o,
-                preset: "custom",
-                to: e.target.value,
-              })
-            }
-          />
-        </span>
-      )}
-    </div>
-  );
-}
     case "toggle":
       return (
         <div className="opts">
@@ -669,7 +671,7 @@ function Control({ filter: f }) {
         </div>
       );
     }
-        case "status-tabs": {
+    case "status-tabs": {
       const statusOptions = [
         { value: "", label: "All" },
         ...options.map((o) => ({
@@ -778,7 +780,7 @@ function FilterPanel({ filter: f }) {
                 onChange={(v) => set("ctrlWidth", v)} />
             </Field>
             <Field label="Gap (px)">
-              <Text type="number" value={f.gap} placeholder="8" onChange={(v) => set("gap", Number(v)) } />
+              <Text type="number" value={f.gap} placeholder="8" onChange={(v) => set("gap", Number(v))} />
             </Field>
           </Row>
           <Toggles>
@@ -859,12 +861,12 @@ function FilterPanel({ filter: f }) {
                   "",
                   ...tables.filter((table) =>
                     table.toLowerCase().includes(tableSearch.toLowerCase())
-                ),
-              ]}
-              onChange={(v) => {
-                set("table", v);
-                setTableSearch("");
-              }}
+                  ),
+                ]}
+                onChange={(v) => {
+                  set("table", v);
+                  setTableSearch("");
+                }}
               />
             </Field>
             <Field label="Column">
@@ -881,128 +883,128 @@ function FilterPanel({ filter: f }) {
           <Hint>Nothing picked = shown on every published link, whatever role opened it.</Hint>
 
           {["select", "radio", "checkbox", "status-tabs"].includes(f.control) && (
-  <>
-    <Group>
-      {f.control === "status-tabs"
-        ? "Status tab options"
-        : "Where the choices come from"}
-    </Group>
+            <>
+              <Group>
+                {f.control === "status-tabs"
+                  ? "Status tab options"
+                  : "Where the choices come from"}
+              </Group>
 
-    {f.control === "status-tabs" ? (
-      <>
-  <Field label="Status values — one per line">
-    <TextArea
-      value={f.list}
-      placeholder={"Pending\nApproved\nRejected\nDraft\nCancelled\nArchived"}
-      onChange={(v) => set("list", v)}
-    />
-  </Field>
+              {f.control === "status-tabs" ? (
+                <>
+                  <Field label="Status values — one per line">
+                    <TextArea
+                      value={f.list}
+                      placeholder={"Pending\nApproved\nRejected\nDraft\nCancelled\nArchived"}
+                      onChange={(v) => set("list", v)}
+                    />
+                  </Field>
 
-  <Hint>
-    These values become clickable tabs. "All" is added automatically.
-  </Hint>
+                  <Hint>
+                    These values become clickable tabs. "All" is added automatically.
+                  </Hint>
 
-  <Group>Automatic archiving</Group>
+                  <Group>Automatic archiving</Group>
 
-  <Toggles>
-    <Check
-      on={!!f.autoArchive}
-      label="Automatically archive old Pending records"
-      onChange={(v) => set("autoArchive", v)}
-    />
-  </Toggles>
+                  <Toggles>
+                    <Check
+                      on={!!f.autoArchive}
+                      label="Automatically archive old Pending records"
+                      onChange={(v) => set("autoArchive", v)}
+                    />
+                  </Toggles>
 
-  {f.autoArchive && (
-    <>
-      <Row>
-        <Field label="Archive after (years)">
-          <Text
-            type="number"
-            value={f.archiveAfterYears}
-            placeholder="1"
-            onChange={(v) =>
-              set("archiveAfterYears", Math.max(1, Number(v) || 1))
-            }
-          />
-        </Field>
+                  {f.autoArchive && (
+                    <>
+                      <Row>
+                        <Field label="Archive after (years)">
+                          <Text
+                            type="number"
+                            value={f.archiveAfterYears}
+                            placeholder="1"
+                            onChange={(v) =>
+                              set("archiveAfterYears", Math.max(1, Number(v) || 1))
+                            }
+                          />
+                        </Field>
 
-        <Field label="Archive as">
-          <Text
-            value={f.archiveStatus}
-            placeholder="Archived"
-            onChange={(v) => set("archiveStatus", v)}
-          />
-        </Field>
-      </Row>
+                        <Field label="Archive as">
+                          <Text
+                            value={f.archiveStatus}
+                            placeholder="Archived"
+                            onChange={(v) => set("archiveStatus", v)}
+                          />
+                        </Field>
+                      </Row>
 
-      <Field label="Date field used for archiving">
-        <Select
-          value={f.archiveDateColumn}
-          options={[
-            "",
-            ...colsOf(state.catalog, f.table).map((c) => c.name)
-          ]}
-          onChange={(v) => set("archiveDateColumn", v)}
-        />
-      </Field>
+                      <Field label="Date field used for archiving">
+                        <Select
+                          value={f.archiveDateColumn}
+                          options={[
+                            "",
+                            ...colsOf(state.catalog, f.table).map((c) => c.name)
+                          ]}
+                          onChange={(v) => set("archiveDateColumn", v)}
+                        />
+                      </Field>
 
-      <Hint>
-        Pending records older than the selected period will be displayed as
-        Archived. The underlying database record is not changed.
-      </Hint>
-    </>
-  )}
-</>
-    ) : (
-      <>
-        <Chips
-          value={f.optionSource}
-          onChange={(v) => set("optionSource", v)}
-          options={[
-            ["auto", "Values in that column"],
-            ["table", "Another table"],
-            ["list", "A list I type"]
-          ]}
-        />
+                      <Hint>
+                        Pending records older than the selected period will be displayed as
+                        Archived. The underlying database record is not changed.
+                      </Hint>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Chips
+                    value={f.optionSource}
+                    onChange={(v) => set("optionSource", v)}
+                    options={[
+                      ["auto", "Values in that column"],
+                      ["table", "Another table"],
+                      ["list", "A list I type"]
+                    ]}
+                  />
 
-        {f.optionSource === "table" && (
-          <Row style={{ marginTop: 8 }}>
-            <Field label="Lookup table">
-              <Select
-                value={f.optTable}
-                options={["", ...tables]}
-                onChange={(v) => set("optTable", v)}
-              />
-            </Field>
+                  {f.optionSource === "table" && (
+                    <Row style={{ marginTop: 8 }}>
+                      <Field label="Lookup table">
+                        <Select
+                          value={f.optTable}
+                          options={["", ...tables]}
+                          onChange={(v) => set("optTable", v)}
+                        />
+                      </Field>
 
-            <Field label="Value column">
-              <Select
-                value={f.optColumn}
-                options={[
-                  "",
-                  ...colsOf(state.catalog, f.optTable).map((c) => c.name)
-                ]}
-                onChange={(v) => set("optColumn", v)}
-              />
-            </Field>
-          </Row>
-        )}
+                      <Field label="Value column">
+                        <Select
+                          value={f.optColumn}
+                          options={[
+                            "",
+                            ...colsOf(state.catalog, f.optTable).map((c) => c.name)
+                          ]}
+                          onChange={(v) => set("optColumn", v)}
+                        />
+                      </Field>
+                    </Row>
+                  )}
 
-        {f.optionSource === "list" && (
-          <div style={{ marginTop: 8 }}>
-            <Field label="Values — one per line">
-              <TextArea
-                value={f.list}
-                placeholder={"Open\nOn hold\nClosed"}
-                onChange={(v) => set("list", v)}
-              />
-            </Field>
-          </div>
-        )}
-      </>
-    )}
-  </>
-)}
+                  {f.optionSource === "list" && (
+                    <div style={{ marginTop: 8 }}>
+                      <Field label="Values — one per line">
+                        <TextArea
+                          value={f.list}
+                          placeholder={"Open\nOn hold\nClosed"}
+                          onChange={(v) => set("list", v)}
+                        />
+                      </Field>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
 
           <Group>Remove</Group>
           <DeleteButton what="this filter"
@@ -1022,8 +1024,8 @@ function Section({ section: sc, index }) {
   const nst = normS(sc.style), dst = normS(sc.descStyle);
   const hasSectionName = String(sc.name || "").trim().length > 0;
 
-const nameOff = sc.nameVisible === false || !hasSectionName;
-const subOff = sc.subVisible === false || !hasSectionName;
+  const nameOff = sc.nameVisible === false || !hasSectionName;
+  const subOff = sc.subVisible === false || !hasSectionName;
   const cols = Math.max(1, Math.min(12, Number(sc.cols) || 4));
   const set = (path, value) => dispatch({ type: "set", target: "section", id: sc.id, path, value });
 
@@ -1054,7 +1056,7 @@ const subOff = sc.subVisible === false || !hasSectionName;
           <button title="Move up" onClick={() => dispatch({ type: "moveSection", id: sc.id, d: -1 })}>↑</button>
           <button title="Move down" onClick={() => dispatch({ type: "moveSection", id: sc.id, d: 1 })}>↓</button>
           <button onClick={() => dispatch({ type: "dupSection", id: sc.id })}>⧉ Copy</button>
-          
+
           <button className="warn" title="Delete this section"
             onClick={() => dispatch({ type: "askDel", sel: { kind: "section", id: sc.id } })}>🗑 Delete</button>
         </div>
@@ -1063,27 +1065,27 @@ const subOff = sc.subVisible === false || !hasSectionName;
       {design && <div className="secidx">Section {String(index).padStart(2, "0")}</div>}
 
       {hasSectionName && (
-      <div
-        className="sec-head"
-        style={nst.align ? {
-          justifyContent:
-            nst.align === "center"
-              ? "center"
-              : nst.align === "right"
-              ? "flex-end"
-              : "flex-start",
-        } : undefined}
-      >
-        <Editable
-          className="sec-name"
-          value={sc.name}
-          editable={design}
-          placeholder={design ? "Untitled section" : ""}
-          style={styleObj(nst, { align: true })}
-          onChange={(v) => set("name", v)}
-        />
-      </div>
-    )}
+        <div
+          className="sec-head"
+          style={nst.align ? {
+            justifyContent:
+              nst.align === "center"
+                ? "center"
+                : nst.align === "right"
+                  ? "flex-end"
+                  : "flex-start",
+          } : undefined}
+        >
+          <Editable
+            className="sec-name"
+            value={sc.name}
+            editable={design}
+            placeholder={design ? "Untitled section" : ""}
+            style={styleObj(nst, { align: true })}
+            onChange={(v) => set("name", v)}
+          />
+        </div>
+      )}
       {sc.rule !== false && !nameOff && <div className="sec-rule" style={ruleStyle} />}
       {hasSectionName && (design || sc.desc) && (
         <Editable

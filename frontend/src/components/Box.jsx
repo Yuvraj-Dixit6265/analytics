@@ -2792,40 +2792,13 @@ if (box.tableMode === "graph") {
 
     return (
     <div className="rt-table-wrap">
-      <div className="table-search-toolbar">
-        <div className="table-search-input-wrap">
-          <svg className="table-search-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            type="text"
-            className="table-search-input"
-            placeholder="Search records by PO#, date, amount, or details..."
-            value={tableSearch}
-            onChange={(e) => setTableSearch(e.target.value)}
-          />
-          {tableSearch && (
-            <button
-              type="button"
-              className="table-search-clear"
-              onClick={() => setTableSearch("")}
-              title="Clear table search"
-            >
-              ×
-            </button>
-          )}
-        </div>
-        {effectiveSearch ? (
+      {effectiveSearch ? (
+        <div className="table-search-toolbar" style={{ justifyContent: "flex-end", marginBottom: 4, minHeight: "auto" }}>
           <span className="table-search-count">
             {filteredRows.length} of {rows.length} {rows.length === 1 ? "record" : "records"}
           </span>
-        ) : rows.length > 0 ? (
-          <span style={{ fontSize: "12px", color: "#64748B" }}>
-            {rows.length} {rows.length === 1 ? "record" : "records"}
-          </span>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
       <table className="rt">
         <thead>
         <tr>

@@ -1049,11 +1049,18 @@ table.pr-items-table tfoot td {
 
 /* ---------- Report & Table Search ---------- */
 .fbar-search-chip {
-  min-width: 280px;
-  max-width: 440px;
-  flex: 1 1 280px;
+  min-width: 220px;
+  flex: 1 1 260px;
   display: flex;
   align-items: center;
+}
+
+.fbar-export-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .fbar-search-inner {
@@ -1254,12 +1261,12 @@ table.pr-items-table tfoot td {
 .public-report {
   max-width: 100% !important;
   margin: 0 !important;
-  padding: 6px 14px 24px !important;
+  padding: 0 14px 20px !important;
 }
 
 .public-pane .sheet,
 .public-report .sheet {
-  padding: 14px 18px 20px !important;
+  padding: 10px 16px 16px !important;
   border-top-width: 4px !important;
   box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04) !important;
   border-radius: 6px !important;
@@ -1267,7 +1274,7 @@ table.pr-items-table tfoot td {
 
 .public-pane .pagebar,
 .public-report .export-actions {
-  margin-bottom: 6px !important;
+  margin-bottom: 0 !important;
   padding: 0 !important;
 }
 
@@ -1369,4 +1376,22 @@ table.pr-items-table tfoot td {
 .public-pane .rt-table-wrap,
 .public-report .rt-table-wrap {
   margin-top: 4px !important;
+}
+
+@media print {
+  .no-print,
+  .fbar-export-actions,
+  .export-actions,
+  .pagebar,
+  .fbar-search-chip,
+  .table-search-toolbar,
+  .xbtn {
+    display: none !important;
+  }
+
+  .sheet {
+    box-shadow: none !important;
+    border-top: none !important;
+    padding: 0 !important;
+  }
 }

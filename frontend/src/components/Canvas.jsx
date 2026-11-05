@@ -92,13 +92,13 @@ function SectionNav() {
     </div>
   );
 }
-export default function Canvas() {
+export default function Canvas({ exportAs, exporting }) {
   const { state, dispatch } = useStore();
   const design = state.mode === "design";
   return (
     <div className="sheet" onMouseDown={() => dispatch({ type: "select", sel: null })}>
       <ReportName />
-      <FilterBar />
+      <FilterBar exportAs={exportAs} exporting={exporting} />
 
 
       {state.doc.sections.map((sc, i) => (
@@ -262,26 +262,79 @@ function SectionNavigation() {
     </div>
   );
 }
-function FilterBar() {
+function FilterBar({ exportAs, exporting }) {
   const { state, dispatch } = useStore();
   const design = state.mode === "design";
-  if (!design && !state.doc.filters.length) return null;
+  const hasFilters = Boolean(state.doc.filters?.length);
+  if (!design && !hasFilters && !exportAs) return null;
+
   return (
     <div className="fbar">
-      {!state.doc.filters.length && design && (
+      {!hasFilters && design && (
         <div className="hint" style={{ margin: "4px 8px 0" }}>
           No filters yet — add one and name it in place.
         </div>
       )}
       {state.doc.filters.map((f, i) => <Filter key={f.id} filter={f} index={i} />)}
-      {(design || Object.keys(state.filterState).length > 0) && (
+
+      <div className="fbar-search-chip">
+        <div className="fbar-search-inner">
+          <svg className="fbar-search-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            className="fbar-search-input"
+            placeholder="Search records by PO#, date, amount, or details..."
+            value={state.searchTerm || ""}
+            onChange={(e) => dispatch({ type: "searchTerm", value: e.target.value })}
+          />
+          {state.searchTerm && (
+            <button
+              type="button"
+              className="fbar-search-clear"
+              onClick={() => dispatch({ type: "searchTerm", value: "" })}
+              title="Clear search"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      </div>
+
+      {(design || Object.keys(state.filterState).length > 0 || state.searchTerm) && (
         <div className="fbar-add">
           {design && (
             <button className="add" onClick={() => dispatch({ type: "addFilter" })}>+ Filter</button>
           )}
-          {Object.keys(state.filterState).length > 0 && (
-            <button className="add" onClick={() => dispatch({ type: "clearFilters" })}>Clear</button>
+          {(Object.keys(state.filterState).length > 0 || state.searchTerm) && (
+            <button className="add" onClick={() => {
+              dispatch({ type: "clearFilters" });
+              dispatch({ type: "searchTerm", value: "" });
+            }}>Clear</button>
           )}
+        </div>
+      )}
+
+      {exportAs && (
+        <div className="fbar-export-actions no-print">
+          <button
+            type="button"
+            className="pb go"
+            disabled={exporting === "pdf"}
+            onClick={() => exportAs("pdf")}
+          >
+            {exporting === "pdf" ? "Preparing…" : "Download PDF"}
+          </button>
+          <button
+            type="button"
+            className="pb go"
+            disabled={exporting === "xlsx"}
+            onClick={() => exportAs("xlsx")}
+          >
+            {exporting === "xlsx" ? "Preparing…" : "Download Excel"}
+          </button>
         </div>
       )}
     </div>

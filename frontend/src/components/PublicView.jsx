@@ -56,6 +56,23 @@ function useParentBackFix() {
             }
           }
         }
+
+        // Reduce spacing between heading and iframe on host portal
+        try {
+          const iframes = parentDoc.querySelectorAll("iframe");
+          iframes.forEach((ifr) => {
+            if (ifr.contentWindow === window) {
+              ifr.style.marginTop = "0px";
+              if (ifr.parentElement) {
+                ifr.parentElement.style.paddingTop = "0px";
+              }
+              const prev = ifr.previousElementSibling;
+              if (prev && /h[1-6]|header|title/i.test(prev.tagName || prev.className || "")) {
+                prev.style.marginBottom = "6px";
+              }
+            }
+          });
+        } catch (e) {}
       } catch (err) {}
     }
 
@@ -165,22 +182,15 @@ function PublicShell({ slug }) {
 
   return (
     <div className="pane public-pane">
-      <div className="pagebar">
-        {window.self === window.top && (
+      {window.self === window.top && (
+        <div className="pagebar">
           <button className="pb" onClick={() => window.history.back()}>
             ← Back
           </button>
-        )}
-        <span className="espacer" />
-        <button className="pb" disabled={exporting === "pdf"} onClick={() => exportAs("pdf")}>
-          {exporting === "pdf" ? "Preparing…" : "Download PDF"}
-        </button>
-        <button className="pb" disabled={exporting === "xlsx"} onClick={() => exportAs("xlsx")}>
-          {exporting === "xlsx" ? "Preparing…" : "Download Excel"}
-        </button>
-      </div>
+        </div>
+      )}
       {state.error && <div className="fx bad" style={{ marginBottom: 14 }}>{state.error}</div>}
-      <Canvas />
+      <Canvas exportAs={exportAs} exporting={exporting} />
     </div>
   );
 }

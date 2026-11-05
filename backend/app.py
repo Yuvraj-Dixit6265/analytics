@@ -1758,7 +1758,13 @@ def _vendor_report_compatible(definition, catalogue):
         if not src.get("base"):
             return True
 
-        scope = Scope(catalogue, src["base"])
+        try:
+            scope = Scope(catalogue, src["base"])
+            for j in src.get("joins") or []:
+                if j.get("table") and j["table"] in catalogue:
+                    scope.add_join(j["table"])
+        except Exception:
+            return False
 
         # The query is vendor-compatible when at least one table in its
         # scope can be connected to the logged-in vendor.
@@ -1826,7 +1832,14 @@ def list_published():
             except Exception:
                 continue
 
-            if not _vendor_report_compatible(definition, catalogue):
+            try:
+                compatible = _vendor_report_compatible(definition, catalogue)
+            except Exception as e:
+                app.logger.warning("Error checking vendor compatibility for %s: %s", r["name"], e)
+                compatible = False
+
+            if not compatible:
+                app.logger.info("Report %s (%s) excluded from vendor dashboard (not compatible)", r["name"], r["process_key"])
                 continue
 
         reports.append({

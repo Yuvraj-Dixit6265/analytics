@@ -119,8 +119,13 @@ def vendor_condition(catalogue, table, column, value, via=None):
                 f"AND ({' OR '.join(unique_clauses)}))"
             ), [value, value]
 
-    # 5. PO-based mapping for tables without direct vendor column (e.g. gate_entries)
-    local_po_col = next((c for c in ("po_number", "po_no", "ponumber", "po_id", "ebeln") if c in cols), None)
+    # 5. PO-based or ASN-based mapping for tables without direct vendor column (e.g. gate_entries)
+    po_cols = ("po_number", "po_no", "ponumber", "pono", "po_num", "purchase_order_number", "purchase_order_no", "purchase_order", "ebeln", "po_id", "order_number", "order_no")
+    local_po_col = next((c for c in po_cols if c in cols), None)
+
+    asn_cols = ("asn_number", "asn_no", "asnnumber", "asnno", "asn_id")
+    local_asn_col = next((c for c in asn_cols if c in cols), None) if not local_po_col else None
+
     if local_po_col:
         candidate_po_tables = [
             "portal_purchase_orders",
@@ -131,16 +136,23 @@ def vendor_condition(catalogue, table, column, value, via=None):
             "asns",
             "orders",
         ]
+        # Dynamically discover any other table in catalogue that has a PO column and a vendor link
         for t in catalogue:
-            tl = t.lower()
-            if t not in candidate_po_tables and t != table and ("purchase_order" in tl or tl.startswith("po_") or "_po_" in tl):
+            if t == table or t in candidate_po_tables:
+                continue
+            t_cols = catalogue[t]
+            has_po = any(c in t_cols for c in po_cols)
+            has_vendor = any(c in t_cols for c in (column, "vendor_id", "vendor_company_id", "vendor_bpno", "bp_no", "bp_number", "vendor_code", "vendor_no"))
+            if has_po and has_vendor:
                 candidate_po_tables.append(t)
 
         for ref in candidate_po_tables:
             if ref == table or ref not in catalogue:
                 continue
             ref_cols = catalogue[ref]
-            ref_po_col = next((c for c in ("po_number", "po_no", "ponumber", "id", "po_id", "ebeln") if c in ref_cols), None)
+            ref_po_col = next((c for c in po_cols if c in ref_cols), None)
+            if not ref_po_col and local_po_col == "po_id":
+                ref_po_col = next((c for c in ("id", "po_id") if c in ref_cols), None)
             if not ref_po_col:
                 continue
 
@@ -173,6 +185,26 @@ def vendor_condition(catalogue, table, column, value, via=None):
                     f"WHERE `_vs`.{_quote(ref_po_col)} = {_quote(table)}.{_quote(local_po_col)} "
                     f"AND `_vs`.{_quote(bp_col)} = %s)"
                 ), [value]
+
+    if local_asn_col:
+        candidate_asn_tables = ["asns", "asn_headers", "portal_asns"]
+        for ref in candidate_asn_tables:
+            if ref == table or ref not in catalogue:
+                continue
+            ref_cols = catalogue[ref]
+            ref_asn_col = next((c for c in asn_cols if c in ref_cols), None)
+            if not ref_asn_col and local_asn_col == "asn_id":
+                ref_asn_col = next((c for c in ("id", "asn_id") if c in ref_cols), None)
+            if not ref_asn_col:
+                continue
+
+            for vc in (column, "vendor_id", "vendor_company_id"):
+                if vc in ref_cols:
+                    return (
+                        f"EXISTS (SELECT 1 FROM {_quote(ref)} AS `_vs` "
+                        f"WHERE `_vs`.{_quote(ref_asn_col)} = {_quote(table)}.{_quote(local_asn_col)} "
+                        f"AND `_vs`.{_quote(vc)} = %s)"
+                    ), [value]
 
     return None
 

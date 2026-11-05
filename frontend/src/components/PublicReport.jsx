@@ -561,7 +561,7 @@ function PublicBox({
         </span>
       )}
 
-      <div style={styleObj(box.style, { bg: true, align: true })}>
+      <div className={box.kind === "value" ? "box-value-body" : undefined} style={styleObj(box.style, { bg: true, align: true })}>
         <PublicBoxBody
           box={box}
           publicKey={publicKey}
@@ -653,7 +653,7 @@ function PublicBoxBody({
             color: c.tone || "#1A2326",
             fontSize: dynamicFontSize,
             lineHeight: 1.25,
-            wordBreak: "break-word",
+            whiteSpace: "nowrap",
           }}
         >
           {c.prefix || ""}

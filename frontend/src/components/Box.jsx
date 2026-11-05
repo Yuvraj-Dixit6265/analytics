@@ -113,7 +113,7 @@ export default function Box({ box, cols }) {
         </span>
       )}
 
-      <div style={styleObj(box.style, { bg: true, align: true })}>
+      <div className={box.kind === "value" ? "box-value-body" : undefined} style={styleObj(box.style, { bg: true, align: true })}>
         <Body box={box} />
       </div>
 
@@ -2204,7 +2204,7 @@ React.useEffect(() => {
 
     return (
       <>
-        <div className="kpi" style={{ color: c.tone || "#1A2326", fontSize: dynamicFontSize, lineHeight: 1.25, wordBreak: "break-word" }}>
+        <div className="kpi" style={{ color: c.tone || "#1A2326", fontSize: dynamicFontSize, lineHeight: 1.25, whiteSpace: "nowrap" }}>
           {c.prefix}{shown}{c.suffix}
           {c.unit && <span className="kpi-unit">{c.unit}</span>}
         </div>

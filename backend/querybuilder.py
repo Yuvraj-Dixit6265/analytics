@@ -119,6 +119,61 @@ def vendor_condition(catalogue, table, column, value, via=None):
                 f"AND ({' OR '.join(unique_clauses)}))"
             ), [value, value]
 
+    # 5. PO-based mapping for tables without direct vendor column (e.g. gate_entries)
+    local_po_col = next((c for c in ("po_number", "po_no", "ponumber", "po_id", "ebeln") if c in cols), None)
+    if local_po_col:
+        candidate_po_tables = [
+            "portal_purchase_orders",
+            "purchase_orders",
+            "purchase_order",
+            "po_header",
+            "po_headers",
+            "asns",
+            "orders",
+        ]
+        for t in catalogue:
+            tl = t.lower()
+            if t not in candidate_po_tables and t != table and ("purchase_order" in tl or tl.startswith("po_") or "_po_" in tl):
+                candidate_po_tables.append(t)
+
+        for ref in candidate_po_tables:
+            if ref == table or ref not in catalogue:
+                continue
+            ref_cols = catalogue[ref]
+            ref_po_col = next((c for c in ("po_number", "po_no", "ponumber", "id", "po_id", "ebeln") if c in ref_cols), None)
+            if not ref_po_col:
+                continue
+
+            # Check if ref has direct vendor column
+            for vc in (column, "vendor_id", "vendor_company_id"):
+                if vc in ref_cols:
+                    return (
+                        f"EXISTS (SELECT 1 FROM {_quote(ref)} AS `_vs` "
+                        f"WHERE `_vs`.{_quote(ref_po_col)} = {_quote(table)}.{_quote(local_po_col)} "
+                        f"AND `_vs`.{_quote(vc)} = %s)"
+                    ), [value]
+
+            # Check if ref has vendor BP number
+            bp_col = next((c for c in ("vendor_bpno", "bp_no", "bp_number", "vendor_code", "vendor_no") if c in ref_cols), None)
+            if bp_col:
+                vm_cols = catalogue.get("vendor_master", set())
+                if "vendor_id" in vm_cols:
+                    vm_bp_cols = [c for c in ("bp_no", "bp_number") if c in vm_cols]
+                    if vm_bp_cols:
+                        bp_match = " OR ".join(f"`_vm`.`{bc}` COLLATE utf8mb4_unicode_ci = `_vs`.`{bp_col}` COLLATE utf8mb4_unicode_ci" for bc in vm_bp_cols)
+                        return (
+                            f"EXISTS (SELECT 1 FROM {_quote(ref)} AS `_vs` "
+                            f"JOIN `vendor_master` AS `_vm` ON ({bp_match}) "
+                            f"WHERE `_vs`.{_quote(ref_po_col)} = {_quote(table)}.{_quote(local_po_col)} "
+                            f"AND (`_vm`.`vendor_id` = %s OR `_vm`.`company_id` = %s))"
+                        ), [value, value]
+
+                return (
+                    f"EXISTS (SELECT 1 FROM {_quote(ref)} AS `_vs` "
+                    f"WHERE `_vs`.{_quote(ref_po_col)} = {_quote(table)}.{_quote(local_po_col)} "
+                    f"AND `_vs`.{_quote(bp_col)} = %s)"
+                ), [value]
+
     return None
 
 

@@ -95,15 +95,61 @@ function SectionNav() {
 export default function Canvas({ exportAs, exporting }) {
   const { state, dispatch } = useStore();
   const design = state.mode === "design";
+
+  // Value KPI boxes (vendor name, total PO value, total invoices, etc.)
+  const topValueBoxes = (state.doc.sections || [])
+    .flatMap((sc) => sc.boxes || [])
+    .filter((b) => b.kind === "value" && b.visible !== false);
+
   return (
     <div className="sheet" onMouseDown={() => dispatch({ type: "select", sel: null })}>
       <ReportName />
-      <FilterBar exportAs={exportAs} exporting={exporting} />
 
+      {(topValueBoxes.length > 0 || exportAs) && (
+        <div className="top-summary-bar">
+          <div className="top-summary-kpis">
+            {topValueBoxes.map((b) => (
+              <Box key={b.id} box={b} cols={topValueBoxes.length} />
+            ))}
+          </div>
+          {exportAs && (
+            <div className="top-summary-export-actions no-print">
+              <button
+                type="button"
+                className="pb go"
+                disabled={exporting === "pdf"}
+                onClick={() => exportAs("pdf")}
+              >
+                {exporting === "pdf" ? "Preparing…" : "Download PDF"}
+              </button>
+              <button
+                type="button"
+                className="pb go"
+                disabled={exporting === "xlsx"}
+                onClick={() => exportAs("xlsx")}
+              >
+                {exporting === "xlsx" ? "Preparing…" : "Download Excel"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
-      {state.doc.sections.map((sc, i) => (
-        <Section key={sc.id} section={sc} index={i + 1} />
-      ))}
+      <FilterBar />
+
+      {state.doc.sections.map((sc, i) => {
+        const remainingBoxes = topValueBoxes.length > 0
+          ? (sc.boxes || []).filter((b) => b.kind !== "value")
+          : (sc.boxes || []);
+        if (!design && remainingBoxes.length === 0) return null;
+        return (
+          <Section
+            key={sc.id}
+            section={topValueBoxes.length > 0 ? { ...sc, boxes: remainingBoxes } : sc}
+            index={i + 1}
+          />
+        );
+      })}
       {design && (
         <div className="addbar">
           <button className="add big" onClick={() => dispatch({ type: "addSection" })}>
@@ -262,11 +308,11 @@ function SectionNavigation() {
     </div>
   );
 }
-function FilterBar({ exportAs, exporting }) {
+function FilterBar() {
   const { state, dispatch } = useStore();
   const design = state.mode === "design";
   const hasFilters = Boolean(state.doc.filters?.length);
-  if (!design && !hasFilters && !exportAs) return null;
+  if (!design && !hasFilters) return null;
 
   return (
     <div className="fbar">
@@ -314,27 +360,6 @@ function FilterBar({ exportAs, exporting }) {
               dispatch({ type: "searchTerm", value: "" });
             }}>Clear</button>
           )}
-        </div>
-      )}
-
-      {exportAs && (
-        <div className="fbar-export-actions no-print">
-          <button
-            type="button"
-            className="pb go"
-            disabled={exporting === "pdf"}
-            onClick={() => exportAs("pdf")}
-          >
-            {exporting === "pdf" ? "Preparing…" : "Download PDF"}
-          </button>
-          <button
-            type="button"
-            className="pb go"
-            disabled={exporting === "xlsx"}
-            onClick={() => exportAs("xlsx")}
-          >
-            {exporting === "xlsx" ? "Preparing…" : "Download Excel"}
-          </button>
         </div>
       )}
     </div>

@@ -63,9 +63,11 @@ function Editable({
 
 export default function Box({ box, cols }) {
   const { state, dispatch } = useStore();
-  const selected = state.sel?.kind === "box" && state.sel.id === box.id;
-  const pending = state.pendingDel?.kind === "box" && state.pendingDel.id === box.id;
-  const design = state.mode === "design";
+  const publicPath = window.location.pathname.match(/^\/(?:analytics\/)?r\/([^/]+)\/([^/]+)/);
+  const isPublic = Boolean(publicPath || state.publicSlug || window.location.pathname.includes("/r/") || window.location.pathname.includes("/p/"));
+  const selected = !isPublic && state.sel?.kind === "box" && state.sel.id === box.id;
+  const pending = !isPublic && state.pendingDel?.kind === "box" && state.pendingDel.id === box.id;
+  const design = state.mode === "design" && !isPublic;
   const span = Math.max(1, Math.min(cols, box.span || 1));
 
   const set = (path, value) =>
@@ -95,10 +97,16 @@ export default function Box({ box, cols }) {
 
       {box.titleVisible !== false && (
         <span className="box-title-container">
-          <Editable className="box-title" value={box.title} placeholder="Unnamed box"
-            style={styleObj(normS(box.titleStyle))}
-            editable={design}
-            onChange={(v) => set("title", v)} />
+          {design ? (
+            <Editable className="box-title" value={box.title} placeholder="Unnamed box"
+              style={styleObj(normS(box.titleStyle))}
+              editable={design}
+              onChange={(v) => set("title", v)} />
+          ) : (
+            <div className="box-title" style={styleObj(normS(box.titleStyle))}>
+              {box.title}
+            </div>
+          )}
           {box.kind === "value" && !String(box.title || "").trim().endsWith(":") && (
             <span className="box-kpi-colon">:</span>
           )}
@@ -796,6 +804,8 @@ function Body({ box }) {
   const { state, dispatch } = useStore();
   const publicPath = window.location.pathname.match(/^\/(?:analytics\/)?r\/([^/]+)\/([^/]+)/);
   const publicSlug = publicPath ? `${publicPath[1]}/${publicPath[2]}` : null;
+  const isPublic = Boolean(publicSlug || state.publicSlug || window.location.pathname.includes("/r/") || window.location.pathname.includes("/p/"));
+  const design = state.mode === "design" && !isPublic;
   const [detailItems, setDetailItems] = React.useState(null);
   const [detailValue, setDetailValue] = React.useState("");
   const [detailRow, setDetailRow] = React.useState(null);
@@ -2832,10 +2842,10 @@ if (box.tableMode === "graph") {
                       ...(col.width ? { width: col.width } : {}),
                       position: "relative",
                     }}
-                    onDragOver={(e) => {
+                    onDragOver={design ? (e) => {
                       e.preventDefault();
-                    }}
-                    onDrop={(e) => {
+                    } : undefined}
+                    onDrop={design ? (e) => {
                       e.preventDefault();
 
                       const draggedCol = e.dataTransfer.getData("text/plain");
@@ -2869,41 +2879,48 @@ if (box.tableMode === "graph") {
                         path: "table.columns",
                         value: currentColumns,
                       });
-                    }}
+                    } : undefined}
                   >
-                    <span
-                      draggable
-                      onDragStart={(e) => {
-                        e.stopPropagation();
-                        e.dataTransfer.setData("text/plain", col.col);
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      style={{
-                        display: "inline-block",
-                        marginRight: "8px",
-                        cursor: "grab",
-                        opacity: 0.55,
-                        userSelect: "none",
-                        fontSize: "13px",
-                      }}
-                      title="Drag to move column"
-                    >
-                      ⋮⋮
-                    </span>
+                    {design && (
+                      <span
+                        draggable
+                        onDragStart={(e) => {
+                          e.stopPropagation();
+                          e.dataTransfer.setData("text/plain", col.col);
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        style={{
+                          display: "inline-block",
+                          marginRight: "8px",
+                          cursor: "grab",
+                          opacity: 0.55,
+                          userSelect: "none",
+                          fontSize: "13px",
+                        }}
+                        title="Drag to move column"
+                      >
+                        ⋮⋮
+                      </span>
+                    )}
 
-                    <Editable
-                      value={col.label}
-                      placeholder="name"
-                      onChange={(v) =>
-                        dispatch({
-                          type: "set",
-                          target: "box",
-                          id: box.id,
-                          path: `table.columns.${i}.label`,
-                          value: v,
-                        })
-                      }
-                    />
+                    {design ? (
+                      <Editable
+                        value={col.label}
+                        placeholder="name"
+                        editable={design}
+                        onChange={(v) =>
+                          dispatch({
+                            type: "set",
+                            target: "box",
+                            id: box.id,
+                            path: `table.columns.${i}.label`,
+                            value: v,
+                          })
+                        }
+                      />
+                    ) : (
+                      cleanHeading(col.label || col.col)
+                    )}
                   </th>
                 );
               })}

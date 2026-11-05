@@ -3,6 +3,7 @@ import { StoreProvider, useStore } from "../store.jsx";
 import { normS, styleObj, frameStyle, fmtCell, fmtNumber } from "../model.js";
 import Chart from "../charts/Chart.jsx";
 import api from "../api.js";
+import { cleanHeading } from "./Box.jsx";
 
 const viewerToken = new URLSearchParams(window.location.search).get("vt") || "";
 
@@ -1038,8 +1039,7 @@ function PublicBoxBody({
                                         key={col.col}
                                         className={col.align === "right" ? "num" : undefined}
                                       >
-                                        {col.label ||
-                                          col.col}
+                                        {cleanHeading(col.label || col.col)}
                                       </th>
                                     ))}
                                 </tr>

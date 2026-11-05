@@ -265,6 +265,32 @@ export function formatDetailHeading(title, value, fallback = "Details") {
   return result.replace(/^[\s\-—–]+/, "").trim() || fallback;
 }
 
+export function cleanHeading(str) {
+  if (!str) return "";
+  const s = String(str).trim();
+  const colName = s.includes(".") ? s.split(".").pop() : s;
+  const withSpaces = colName.replace(/_+/g, " ").trim();
+
+  if (!colName.includes("_") && s === str && !s.includes(".")) {
+    return s;
+  }
+
+  return withSpaces
+    .split(/\s+/)
+    .map((word) => {
+      const lower = word.toLowerCase();
+      if (
+        ["po", "id", "hsn", "gst", "cgst", "sgst", "igst", "uom", "grn", "pr", "qty", "no"].includes(
+          lower
+        )
+      ) {
+        return lower.toUpperCase();
+      }
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(" ");
+}
+
 function DetailPopup({
   box,
   detail,
@@ -512,7 +538,7 @@ function DetailPopup({
               <tr>
                 <th>#</th>
                 {cols.map((c, j) => (
-                  <th key={`${c.col}-${j}`}>{c.label || labelFrom(c.col)}</th>
+                  <th key={`${c.col}-${j}`}>{cleanHeading(c.label || c.col)}</th>
                 ))}
               </tr>
             </thead>
@@ -2655,7 +2681,7 @@ if (box.tableMode === "graph") {
                     .filter((col) => col.col)
                     .map((col) => (
                       <th key={col.col} className={col.align === "right" ? "num" : undefined}>
-                        {col.label || col.col}
+                        {cleanHeading(col.label || col.col)}
                       </th>
                     ))}
                 </tr>
@@ -4879,32 +4905,53 @@ function TableData({ box, set }) {
   const { state, dispatch } = useStore();
   const c = box.table || {};
   React.useEffect(() => {
-  const details = c.detail?.columns || [];
+    const details = c.detail?.columns || [];
 
-  details.forEach((col, i) => {
-    if (!col.col || !col.col.includes(".")) return;
+    details.forEach((col, i) => {
+      if (!col.col) return;
 
-    const actualName = col.col.split(".").pop();
+      const raw = col.col.includes(".") ? col.col.split(".").pop() : col.col;
+      const clean = cleanHeading(raw);
 
-    if (!col.label || col.label === col.col || col.label === actualName) {
-      set(`table.detail.columns.${i}.label`, actualName);
-    }
-  });
-}, [c.detail?.columns]);
+      if (!col.label || col.label === col.col || col.label === raw || col.label.includes("_")) {
+        set(`table.detail.columns.${i}.label`, clean);
+      }
+    });
+  }, [c.detail?.columns]);
   const parentTable = box.src?.base || "";
 
   // Get columns from the selected database source
   const availableColumns = colOptions(state.catalog, box.src)
-  .map((x) => x.name);
+    .map((x) => x.name);
 
-const detailAvailableColumns = [
-  ...(state.catalog?.tables || []).flatMap((table) =>
-    (table.columns || []).map((col) => [
-      `${table.name}.${col.name}`,
-      col.name,
-    ])
-  ),
-];
+  const catalogTableList = (state.catalog?.tables || []).filter(
+    (t) => typeof t !== "string" && t.name
+  );
+
+  const selectedDetailTable = c.detail?.table || "";
+
+  const detailAvailableColumns = selectedDetailTable
+    ? (
+        catalogTableList.find((t) => t.name === selectedDetailTable)?.columns ||
+        []
+      ).map((col) => {
+        const colName = typeof col === "string" ? col : col.name;
+        return [
+          `${selectedDetailTable}.${colName}`,
+          cleanHeading(colName),
+        ];
+      })
+    : [
+        ...catalogTableList.flatMap((table) =>
+          (table.columns || []).map((col) => {
+            const colName = typeof col === "string" ? col : col.name;
+            return [
+              `${table.name}.${colName}`,
+              `${table.name} — ${cleanHeading(colName)}`,
+            ];
+          })
+        ),
+      ];
 const addAllColumns = () => {
   const allColumns = colOptions(state.catalog, box.src)
     .map((x) => x.name)
@@ -5211,6 +5258,22 @@ const addAllColumns = () => {
     />
   </Field>
 </Row>
+
+<Row>
+  <Field label="Line items table">
+    <Select
+      value={c.detail?.table || ""}
+      options={[
+        ["", "All tables / Any table"],
+        ...catalogTableList.map((t) => [t.name, t.name]),
+      ]}
+      onChange={(v) => {
+        set("table.detail.table", v);
+      }}
+    />
+  </Field>
+</Row>
+
           <Group>Detail Columns</Group>
 
           <div className="collist">
@@ -5230,10 +5293,11 @@ const addAllColumns = () => {
                         v
                       );
 
-                      if (!col.label && v) {
+                      if (v) {
+                        const raw = v.includes(".") ? v.split(".").pop() : v;
                         set(
                           `table.detail.columns.${i}.label`,
-                          v
+                          cleanHeading(raw)
                         );
                       }
                     }}
@@ -5243,11 +5307,11 @@ const addAllColumns = () => {
                 <Field label="Heading">
                   <Text
                     value={col.label || ""}
-                    placeholder="Column heading"
+                    placeholder="Column heading (no underscores)"
                     onChange={(v) =>
                       set(
                         `table.detail.columns.${i}.label`,
-                        v
+                        v.replace(/_/g, " ")
                       )
                     }
                   />
@@ -5285,29 +5349,65 @@ const addAllColumns = () => {
             ))}
           </div>
 
-          <button
-            className="pb"
-            onClick={() =>
-              set("table.detail.columns", [
-                ...(c.detail.columns || []),
-                {
-                  col: "",
-                  label: "",
-                  fmt: "auto",
-                  align: "left",
-                  width: "auto",
-                  on: true,
-                },
-              ])
-            }
-            style={{ marginTop: 10 }}
-          >
-            + Add Detail Column
-          </button>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+            <button
+              className="pb"
+              type="button"
+              onClick={() =>
+                set("table.detail.columns", [
+                  ...(c.detail.columns || []),
+                  {
+                    col: "",
+                    label: "",
+                    fmt: "auto",
+                    align: "left",
+                    width: "auto",
+                    on: true,
+                  },
+                ])
+              }
+            >
+              + Add Detail Column
+            </button>
+
+            {selectedDetailTable && (
+              <button
+                className="pb"
+                type="button"
+                onClick={() => {
+                  const tableCols = (
+                    catalogTableList.find((t) => t.name === selectedDetailTable)
+                      ?.columns || []
+                  ).map((col) => {
+                    const colName = typeof col === "string" ? col : col.name;
+                    return {
+                      col: `${selectedDetailTable}.${colName}`,
+                      label: cleanHeading(colName),
+                      fmt: "auto",
+                      align: "left",
+                      width: "auto",
+                      on: true,
+                    };
+                  });
+                  const existingCols = new Set(
+                    (c.detail.columns || []).map((x) => x.col).filter(Boolean)
+                  );
+                  const toAdd = tableCols.filter(
+                    (tc) => !existingCols.has(tc.col)
+                  );
+                  set("table.detail.columns", [
+                    ...(c.detail.columns || []),
+                    ...toAdd,
+                  ]);
+                }}
+              >
+                + Add All Columns from {selectedDetailTable}
+              </button>
+            )}
+          </div>
 
           <Hint>
-            Choose a column to make clickable. The detail list can have
-            its own database columns and headings.
+            Select the line items table and choose columns. You can edit any heading to rename it — underscores are automatically removed.
           </Hint>
         </>
       )}

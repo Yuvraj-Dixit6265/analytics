@@ -448,15 +448,16 @@ export function fmtDate(v) {
 export function cleanInvoiceNumber(val) {
   if (typeof val !== "string") return val;
   const s = val.trim();
-  if (/^INV[\s_\-]/i.test(s) || /^INV\d/i.test(s)) {
+  if (
+    /^INV[\s_\-]/i.test(s) ||
+    /^INV\d/i.test(s) ||
+    /\d+\s*_\s*\d+/.test(s) ||
+    (/[\s_\-]20\d\d\s*$/i.test(s) && /\d{4,}/.test(s) && !/^[A-Za-z]{3}|^\d{1,2}[-\s][A-Za-z]{3}/.test(s))
+  ) {
     let clean = s.replace(/^INV[\s_\-]*/i, "");
     clean = clean.replace(/[\s_\-]*20\d\d\s*$/i, "");
-    return clean.trim().replace(/^_+|_+$/g, "").trim();
-  }
-  if (/[\s_\-]20\d\d\s*$/i.test(s) && /\d{4,}/.test(s) && !/^[A-Za-z]{3}|^\d{1,2}[-\s][A-Za-z]{3}/.test(s)) {
-    let clean = s.replace(/[\s_\-]*20\d\d\s*$/i, "");
-    clean = clean.replace(/^INV[\s_\-]*/i, "");
-    return clean.trim().replace(/^_+|_+$/g, "").trim();
+    clean = clean.replace(/\s*_\s*/g, " ");
+    return clean.trim();
   }
   return val;
 }

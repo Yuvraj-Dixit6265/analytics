@@ -789,14 +789,14 @@ def _clean_invoice_number(val):
     if not isinstance(val, str):
         return val
     s = val.strip()
-    if re.search(r"^INV[\s_\-]", s, re.I) or re.search(r"^INV\d", s, re.I):
+    if (re.search(r"^INV[\s_\-]", s, re.I) or re.search(r"^INV\d", s, re.I)
+            or re.search(r"\d+\s*_\s*\d+", s)
+            or (re.search(r"[\s_\-]20\d\d\s*$", s) and re.search(r"\d{4,}", s)
+                and not re.search(r"^[A-Za-z]{3}|^\d{1,2}[-\s][A-Za-z]{3}", s))):
         s = re.sub(r"^INV[\s_\-]*", "", s, flags=re.I)
         s = re.sub(r"[\s_\-]*20\d\d\s*$", "", s)
-        return s.strip().strip("_").strip()
-    if re.search(r"[\s_\-]20\d\d\s*$", s) and re.search(r"\d{4,}", s) and not re.search(r"^[A-Za-z]{3}|^\d{1,2}[-\s][A-Za-z]{3}", s):
-        s = re.sub(r"[\s_\-]*20\d\d\s*$", "", s)
-        s = re.sub(r"^INV[\s_\-]*", "", s, flags=re.I)
-        return s.strip().strip("_").strip()
+        s = re.sub(r"\s*_\s*", " ", s)
+        return s.strip()
     return val
 
 

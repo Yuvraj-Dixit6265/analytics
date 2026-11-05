@@ -528,9 +528,12 @@ function PublicBox({
     Math.min(cols, box.span || 1)
   );
 
+  const cls = ["box", `box-${box.kind}`];
+  if (box.frame?.on) cls.push("framed");
+
   return (
     <div
-      className={`box${box.frame?.on ? " framed" : ""}`}
+      className={cls.join(" ")}
       style={{
         gridColumn: `span ${span}`,
         ...(box.style?.bg
@@ -543,12 +546,17 @@ function PublicBox({
       }}
     >
       {box.titleVisible !== false && (
-        <div
-          className="box-title"
-          style={styleObj(normS(box.titleStyle))}
-        >
-          {box.title}
-        </div>
+        <span className="box-title-container">
+          <div
+            className="box-title"
+            style={styleObj(normS(box.titleStyle))}
+          >
+            {box.title}
+          </div>
+          {box.kind === "value" && !String(box.title || "").trim().endsWith(":") && (
+            <span className="box-kpi-colon">:</span>
+          )}
+        </span>
       )}
 
       <div style={styleObj(box.style, { bg: true, align: true })}>

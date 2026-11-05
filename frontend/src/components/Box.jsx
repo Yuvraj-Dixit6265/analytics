@@ -71,7 +71,7 @@ export default function Box({ box, cols }) {
   const set = (path, value) =>
     dispatch({ type: "set", target: "box", id: box.id, path, value });
 
-  const cls = ["box"];
+  const cls = ["box", `box-${box.kind}`];
   if (box.frame?.on) cls.push("framed");
   if (box.visible === false) cls.push("boxoff");
   if (selected) cls.push("sel");
@@ -94,10 +94,15 @@ export default function Box({ box, cols }) {
       {selected && design && <Toolbar box={box} />}
 
       {box.titleVisible !== false && (
-        <Editable className="box-title" value={box.title} placeholder="Unnamed box"
-          style={styleObj(normS(box.titleStyle))}
-          editable={design}
-          onChange={(v) => set("title", v)} />
+        <span className="box-title-container">
+          <Editable className="box-title" value={box.title} placeholder="Unnamed box"
+            style={styleObj(normS(box.titleStyle))}
+            editable={design}
+            onChange={(v) => set("title", v)} />
+          {box.kind === "value" && !String(box.title || "").trim().endsWith(":") && (
+            <span className="box-kpi-colon">:</span>
+          )}
+        </span>
       )}
 
       <div style={styleObj(box.style, { bg: true, align: true })}>

@@ -68,7 +68,10 @@ export default function Box({ box, cols }) {
   const selected = !isPublic && state.sel?.kind === "box" && state.sel.id === box.id;
   const pending = !isPublic && state.pendingDel?.kind === "box" && state.pendingDel.id === box.id;
   const design = state.mode === "design" && !isPublic;
-  const span = Math.max(1, Math.min(cols, box.span || 1));
+  let span = Math.max(1, Math.min(cols, box.span || 1));
+  if (box.kind === "value" && span < Math.floor(cols / 2) && cols >= 4) {
+    span = Math.floor(cols / 2);
+  }
 
   const set = (path, value) =>
     dispatch({ type: "set", target: "box", id: box.id, path, value });

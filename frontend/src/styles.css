@@ -202,8 +202,9 @@ body.design .box:hover{border-color:#94A3B8}
   flex-wrap: nowrap !important;
   white-space: nowrap !important;
   min-height: 42px !important;
-  width: max-content !important;
-  max-width: 100% !important;
+  width: auto !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
 }
 
 .box.box-value .box-title-container,
@@ -1136,8 +1137,9 @@ table.pr-items-table tfoot td {
 
 /* ---------- Report & Table Search ---------- */
 .fbar-search-chip {
-  min-width: 220px;
-  flex: 1 1 260px;
+  min-width: 140px;
+  flex: 1 1 180px;
+  max-width: 260px;
   display: flex;
   align-items: center;
 }
@@ -1146,8 +1148,17 @@ table.pr-items-table tfoot td {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
+}
+
+.fbar-export-actions .pb {
+  height: 32px !important;
+  padding: 4px 12px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  border-radius: 5px !important;
+  white-space: nowrap !important;
 }
 
 .fbar-search-inner {

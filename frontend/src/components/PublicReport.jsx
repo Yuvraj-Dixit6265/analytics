@@ -525,10 +525,10 @@ function PublicBox({
   publicKey,
   publicToken,
 }) {
-  const span = Math.max(
-    1,
-    Math.min(cols, box.span || 1)
-  );
+  let span = Math.max(1, Math.min(cols, box.span || 1));
+  if (box.kind === "value" && span < Math.floor(cols / 2) && cols >= 4) {
+    span = Math.floor(cols / 2);
+  }
 
   const cls = ["box", `box-${box.kind}`];
   if (box.frame?.on) cls.push("framed");

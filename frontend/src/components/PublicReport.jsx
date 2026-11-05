@@ -328,26 +328,28 @@ function PublicCanvas({ doc }) {
 
   return (
     <div className="sheet">
-      <div
-        className="rep-name-wrap"
-        style={
-          normS(doc.nameStyle).align
-            ? { textAlign: normS(doc.nameStyle).align }
-            : undefined
-        }
-      >
+      {!(typeof window !== "undefined" && window.self !== window.top) && (
         <div
-          className="rep-name"
-          style={styleObj(normS(doc.nameStyle))}
+          className="rep-name-wrap"
+          style={
+            normS(doc.nameStyle).align
+              ? { textAlign: normS(doc.nameStyle).align }
+              : undefined
+          }
         >
-          {doc.name || "Vendor Purchase Order Report"}
-        </div>
-        {doc.desc && (
-          <div className="rep-subtitle">
-            {doc.desc}
+          <div
+            className="rep-name"
+            style={styleObj(normS(doc.nameStyle))}
+          >
+            {doc.name || "Vendor Purchase Order Report"}
           </div>
-        )}
-      </div>
+          {doc.desc && (
+            <div className="rep-subtitle">
+              {doc.desc}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="pr-report-search-bar">
         <div className="fbar-search-inner">

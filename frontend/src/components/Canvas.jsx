@@ -121,6 +121,8 @@ function ReportName() {
   const selected = state.sel?.kind === "doc";
   const st = normS(state.doc.nameStyle);
   const design = state.mode === "design";
+  const isEmbedded = typeof window !== "undefined" && window.self !== window.top;
+  if (!design && isEmbedded) return null;
   const set = (path, value) => dispatch({ type: "set", target: "doc", path, value });
 
   return (

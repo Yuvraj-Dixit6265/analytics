@@ -35,6 +35,52 @@ class Boundary extends React.Component {
   }
 }
 
+function useParentBackFix() {
+  React.useEffect(() => {
+    function fix() {
+      if (typeof window === "undefined" || !window.parent || window.parent === window) return;
+      try {
+        const parentDoc = window.parent.document;
+        if (!parentDoc || !parentDoc.body) return;
+
+        const walker = parentDoc.createTreeWalker(parentDoc.body, NodeFilter.SHOW_TEXT, null, false);
+        let node;
+        while ((node = walker.nextNode())) {
+          if (node.nodeValue) {
+            if (/all\s+analytics/i.test(node.nodeValue)) {
+              node.nodeValue = node.nodeValue.replace(/all\s+analytics/gi, "Back");
+            } else if (/all\s+dashboards/i.test(node.nodeValue)) {
+              node.nodeValue = node.nodeValue.replace(/all\s+dashboards/gi, "Back");
+            } else if (/all\s+reports/i.test(node.nodeValue)) {
+              node.nodeValue = node.nodeValue.replace(/all\s+reports/gi, "Back");
+            }
+          }
+        }
+      } catch (err) {}
+    }
+
+    fix();
+    const interval = setInterval(fix, 200);
+
+    let observer = null;
+    try {
+      if (window.parent && window.parent.document && window.parent.document.body) {
+        observer = new MutationObserver(fix);
+        observer.observe(window.parent.document.body, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+      }
+    } catch (e) {}
+
+    return () => {
+      clearInterval(interval);
+      if (observer) observer.disconnect();
+    };
+  }, []);
+}
+
 export default function PublicView({ slug }) {
   return (
     <StoreProvider>
@@ -51,6 +97,8 @@ function PublicShell({ slug }) {
   const [loaded, setLoaded] = React.useState(false);
   const [loadErr, setLoadErr] = React.useState(null);
   const [exporting, setExporting] = React.useState(null);
+
+  useParentBackFix();
 
   const exportAs = async (fmt) => {
     setExporting(fmt);
@@ -116,8 +164,13 @@ function PublicShell({ slug }) {
   }
 
   return (
-    <div className="pane">
-            <div className="pagebar">
+    <div className="pane public-pane">
+      <div className="pagebar">
+        {window.self === window.top && (
+          <button className="pb" onClick={() => window.history.back()}>
+            ← Back
+          </button>
+        )}
         <span className="espacer" />
         <button className="pb" disabled={exporting === "pdf"} onClick={() => exportAs("pdf")}>
           {exporting === "pdf" ? "Preparing…" : "Download PDF"}

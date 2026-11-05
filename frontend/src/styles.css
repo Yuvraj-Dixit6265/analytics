@@ -13,8 +13,43 @@
   --mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
 }
 *,*::before,*::after{box-sizing:border-box}
-html,body{margin:0}
-body{font-family:var(--sans);background:var(--paper);color:var(--text);font-size:14px;line-height:1.45}
+html {
+  margin: 0;
+  overflow-y: scroll !important;
+  scrollbar-gutter: stable;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  overflow-y: scroll !important;
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+/* Permanent visible scrollbar line on the right side */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: #EEF2F6;
+  border-left: 1px solid #CBD5E1;
+}
+::-webkit-scrollbar-thumb {
+  background: #94A3B8;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #64748B;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #94A3B8 #EEF2F6;
+}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--oxide);outline-offset:2px}
 h1,h2,h3,h4{font-family:var(--sans-heading);font-weight:600;margin:0}
@@ -1200,4 +1235,128 @@ table.pr-items-table tfoot td {
 .table-search-reset-btn:hover {
   background: #EFF6FF;
   border-color: #93C5FD;
+}
+
+/* ==============================================================
+   Compact, Space-Utilized Layout for Published Reports & Views
+   ============================================================== */
+.public-pane,
+.public-report {
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 6px 14px 24px !important;
+}
+
+.public-pane .sheet,
+.public-report .sheet {
+  padding: 14px 18px 20px !important;
+  border-top-width: 4px !important;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04) !important;
+  border-radius: 6px !important;
+}
+
+.public-pane .pagebar,
+.public-report .export-actions {
+  margin-bottom: 6px !important;
+  padding: 0 !important;
+}
+
+.public-pane .rep-name-wrap,
+.public-report .rep-name-wrap {
+  padding-bottom: 6px !important;
+  margin-bottom: 10px !important;
+}
+
+.public-pane .rep-name,
+.public-report .rep-name {
+  font-size: 19px !important;
+  min-height: auto !important;
+  line-height: 1.2 !important;
+}
+
+.public-pane .rep-subtitle,
+.public-report .rep-subtitle {
+  font-size: 12px !important;
+  margin-top: 2px !important;
+}
+
+.public-pane .fbar,
+.public-report .fbar {
+  padding: 6px 10px !important;
+  margin-bottom: 10px !important;
+  gap: 6px !important;
+}
+
+.public-pane .fchip,
+.public-report .fchip {
+  padding: 4px 7px 5px !important;
+  min-width: 120px !important;
+}
+
+.public-pane .sec,
+.public-report .sec {
+  margin-bottom: 12px !important;
+}
+
+.public-pane .sec-head,
+.public-report .sec-head {
+  margin-bottom: 3px !important;
+}
+
+.public-pane .sec-name,
+.public-report .sec-name {
+  font-size: 14px !important;
+  font-weight: 700 !important;
+}
+
+.public-pane .sec-rule,
+.public-report .sec-rule {
+  margin-bottom: 6px !important;
+  height: 2px !important;
+}
+
+.public-pane .sec-desc,
+.public-report .sec-desc {
+  font-size: 12px !important;
+  margin-bottom: 6px !important;
+}
+
+.public-pane .grid,
+.public-report .grid {
+  gap: 8px !important;
+}
+
+.public-pane .box,
+.public-report .box {
+  padding: 8px 12px !important;
+  min-height: 52px !important;
+}
+
+.public-pane .btitle,
+.public-report .btitle {
+  margin-bottom: 2px !important;
+  font-size: 11px !important;
+}
+
+.public-pane .bval,
+.public-report .bval {
+  font-size: 20px !important;
+  line-height: 1.15 !important;
+}
+
+.public-pane table.rt th,
+.public-report table.rt th {
+  padding: 6px 8px !important;
+  font-size: 11.5px !important;
+}
+
+.public-pane table.rt td,
+.public-report table.rt td {
+  padding: 6px 8px !important;
+  font-size: 12px !important;
+}
+
+.public-pane .rt-table-wrap,
+.public-report .rt-table-wrap {
+  margin-top: 4px !important;
 }

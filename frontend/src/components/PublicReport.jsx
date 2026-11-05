@@ -91,13 +91,59 @@ export default function PublicReport() {
   );
 }
 
-// frontend/src/components/PublicReport.jsx
+function useParentBackFix() {
+  React.useEffect(() => {
+    function fix() {
+      if (typeof window === "undefined" || !window.parent || window.parent === window) return;
+      try {
+        const parentDoc = window.parent.document;
+        if (!parentDoc || !parentDoc.body) return;
+
+        const walker = parentDoc.createTreeWalker(parentDoc.body, NodeFilter.SHOW_TEXT, null, false);
+        let node;
+        while ((node = walker.nextNode())) {
+          if (node.nodeValue) {
+            if (/all\s+analytics/i.test(node.nodeValue)) {
+              node.nodeValue = node.nodeValue.replace(/all\s+analytics/gi, "Back");
+            } else if (/all\s+dashboards/i.test(node.nodeValue)) {
+              node.nodeValue = node.nodeValue.replace(/all\s+dashboards/gi, "Back");
+            } else if (/all\s+reports/i.test(node.nodeValue)) {
+              node.nodeValue = node.nodeValue.replace(/all\s+reports/gi, "Back");
+            }
+          }
+        }
+      } catch (err) {}
+    }
+
+    fix();
+    const interval = setInterval(fix, 200);
+
+    let observer = null;
+    try {
+      if (window.parent && window.parent.document && window.parent.document.body) {
+        observer = new MutationObserver(fix);
+        observer.observe(window.parent.document.body, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+        });
+      }
+    } catch (e) {}
+
+    return () => {
+      clearInterval(interval);
+      if (observer) observer.disconnect();
+    };
+  }, []);
+}
 
 function PublicReportInner({ slug }) {
   const { state, dispatch } = useStore();
   const [publicKey, publicToken] = slug.split("/");
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
+
+  useParentBackFix();
 
   React.useEffect(() => {
     let cancelled = false;
@@ -173,7 +219,7 @@ function PublicReportInner({ slug }) {
   }
 
   return (
-    <div className="pane public-report">
+    <div className="pane public-report public-pane">
 
       {/* ONLY download options for employees / viewers */}
       <div

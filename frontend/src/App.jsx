@@ -452,9 +452,6 @@ function Shell() {
           <button className="pb" disabled={exporting === "pdf"} onClick={() => exportAs("pdf")}>
             {exporting === "pdf" ? "Preparing…" : "Download PDF"}
           </button>
-          <button className="pb" disabled={exporting === "pptx"} onClick={() => exportAs("pptx")}>
-            {exporting === "pptx" ? "Preparing…" : "PPT"}
-          </button>
           <button
   className="pb"
   type="button"

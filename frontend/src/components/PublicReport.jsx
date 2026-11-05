@@ -182,13 +182,6 @@ function PublicReportInner({ slug }) {
           Download PDF
         </a>
 
-        <a
-          className="pb"
-          href={formatSlugUrl(slug, "export/pptx")}
-        >
-          Download PPT
-        </a>
-
         <button
           className="pb"
           type="button"

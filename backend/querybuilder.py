@@ -432,7 +432,7 @@ def build(box, filters, state, catalogue, role_row=None, force=None):
     if kind == "value" and (box.get("value") or {}).get("source") == "manual":
         return None, None
     if src.get("mode") == "sql":
-        if force:
+        if force and (force.get("role") == "vendor" or force.get("value")):
             raise BadDefinition("custom-SQL boxes are not available on vendor links")
         params = []
         sql = _raw_select(src.get("sql"), filters, state, params)
@@ -524,7 +524,7 @@ def build(box, filters, state, catalogue, role_row=None, force=None):
     where = _own_where(scope, src, params)
     if box.get("useFilters") is not False:
         where += filter_conditions(scope, filters, state, role_row, params)
-    if force:
+    if force and force.get("column") and force.get("value"):
         cond = None
         for t in scope.tables:  # base table first, then joined tables
             cond = vendor_condition(catalogue, t, force["column"], force["value"], force.get("via"))

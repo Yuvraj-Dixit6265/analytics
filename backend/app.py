@@ -435,6 +435,81 @@ def _catalogue(conn_row):
     return db.catalogue_index(db.introspect(conn_row))
 
 
+def _get_vendor_name(conn_row, cat, vendor_id, base_table=None, rows=None):
+    if rows:
+        for r in rows:
+            for k, v in r.items():
+                clean_k = k.split(".")[-1].split("__")[-1].lower()
+                if clean_k in ("vendor_name", "legal_name", "vendor_bpname", "supplier_name", "vendor") and v:
+                    return str(v).strip()
+
+    if not vendor_id:
+        return None
+
+    s_id = str(vendor_id).strip()
+    if " - " in s_id:
+        parts = s_id.split(" - ", 1)
+        if len(parts) > 1 and parts[1].strip():
+            return parts[1].strip()
+        s_id = parts[0].strip()
+
+    # Check vendor_master table in connected DB
+    vm_cols = cat.get("vendor_master", set())
+    name_cols = [c for c in ("vendor_name", "legal_name", "name") if c in vm_cols]
+    if name_cols:
+        for nc in name_cols:
+            for idc in ("vendor_id", "bp_no", "bp_number", "company_id", "id"):
+                if idc in vm_cols:
+                    try:
+                        sql = f"SELECT `{nc}` AS name FROM `vendor_master` WHERE `{idc}` = %s AND `{nc}` IS NOT NULL AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
+                        res = db.run_report_query(conn_row, sql, (s_id,))
+                        if res and res[0].get("name"):
+                            return str(res[0]["name"]).strip()
+                    except Exception:
+                        pass
+
+    # Check base table if it has vendor_name and vendor_id / vendor_bpno
+    if base_table and base_table in cat:
+        b_cols = cat[base_table]
+        nc = next((c for c in ("vendor_name", "legal_name", "vendor_bpname", "supplier_name", "name") if c in b_cols), None)
+        idc = next((c for c in ("vendor_id", "vendor_bpno", "vendor_code", "vendor_no", "bp_no", "bp_number") if c in b_cols), None)
+        if nc and idc:
+            try:
+                sql = f"SELECT DISTINCT `{nc}` AS name FROM `{base_table}` WHERE `{idc}` = %s AND `{nc}` IS NOT NULL AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
+                res = db.run_report_query(conn_row, sql, (s_id,))
+                if res and res[0].get("name"):
+                    return str(res[0]["name"]).strip()
+            except Exception:
+                pass
+        if nc:
+            try:
+                cond = vendor_condition(cat, base_table, VENDOR_SCOPE_COLUMN, s_id, VENDOR_SCOPE_VIA)
+                if cond:
+                    sql = f"SELECT DISTINCT `{nc}` AS name FROM `{base_table}` WHERE {cond[0]} AND `{nc}` IS NOT NULL AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
+                    res = db.run_report_query(conn_row, sql, tuple(cond[1]))
+                    if res and res[0].get("name"):
+                        return str(res[0]["name"]).strip()
+            except Exception:
+                pass
+
+    # Check any table with vendor_name and vendor_id
+    for tbl, cols in cat.items():
+        if tbl in ("users", "publications", "data_connections"):
+            continue
+        nc = next((c for c in ("vendor_name", "legal_name", "vendor_bpname") if c in cols), None)
+        idc = next((c for c in ("vendor_id", "vendor_bpno", "bp_no", "bp_number") if c in cols), None)
+        if nc and idc:
+            try:
+                sql = f"SELECT `{nc}` AS name FROM `{tbl}` WHERE `{idc}` = %s AND `{nc}` IS NOT NULL AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
+                res = db.run_report_query(conn_row, sql, (s_id,))
+                if res and res[0].get("name"):
+                    return str(res[0]["name"]).strip()
+            except Exception:
+                pass
+
+    return None
+
+
 def _run_box(box, definition, state, conn_row, cat, role_row, values, force=None):
     """Return the finished payload for one box."""
     kind = box.get("kind")
@@ -530,6 +605,45 @@ def _run_box(box, definition, state, conn_row, cat, role_row, values, force=None
         return {"value": None}
     rows = db.run_report_query(conn_row, sql, params)
     if kind == "value":
+        val_cfg = box.get("value") or {}
+        title = (box.get("title") or "").strip().upper()
+        col = (val_cfg.get("column") or "").strip().lower()
+        is_vendor_kpi = (
+            val_cfg.get("showVendorNameOnVendorLogin")
+            or title in ("VENDOR", "VENDORS", "TOTAL VENDOR", "TOTAL VENDORS", "VENDOR NAME")
+            or col in ("vendor_id", "vendor_name", "vendor_bpno", "vendor", "vendor_no", "vendor_code")
+        )
+
+        is_vendor_view = bool(force and (force.get("role") == "vendor" or force.get("value") or force.get("vendor_name")))
+
+        # 1. On Vendor login: show vendor name instead of number
+        if is_vendor_kpi and is_vendor_view:
+            v_name = force.get("vendor_name")
+            if not v_name:
+                v_name = _get_vendor_name(conn_row, cat, force.get("value"), base_table=box.get("src", {}).get("base"), rows=rows)
+            if v_name:
+                return {"value": v_name}
+            elif force.get("value"):
+                return {"value": force.get("value")}
+
+        # 2. On Employee and Admin login: show total number of vendor only
+        if is_vendor_kpi and not is_vendor_view:
+            src_base = (box.get("src") or {}).get("base")
+            cols_in_base = cat.get(src_base, set()) if src_base else set()
+            vendor_col = next((c for c in ("vendor_id", "vendor_bpno", "vendor_code", "vendor_name", "vendor", "bp_no") if c in cols_in_base), None)
+            if vendor_col and src_base and val_cfg.get("agg") != "COUNT DISTINCT":
+                try:
+                    import copy
+                    vendor_box = copy.deepcopy(box)
+                    vendor_box["value"] = {**(box.get("value") or {}), "agg": "COUNT DISTINCT", "column": vendor_col}
+                    v_sql, v_params = build(vendor_box, definition.get("filters"), state, cat, role_row, force)
+                    if v_sql:
+                        cnt_res = db.run_report_query(conn_row, v_sql, v_params)
+                        if cnt_res and cnt_res[0].get("value") is not None:
+                            return {"value": cnt_res[0]["value"]}
+                except Exception:
+                    pass
+
         return {"value": rows[0]["value"] if rows else None}
     if kind == "chart":
         return {"data": [{"label": str(r["category"]), "value": r["value"]} for r in rows]}
@@ -1238,14 +1352,37 @@ VENDOR_SCOPE_REFERENCE_TABLES = {
 
 
 def _attach_vendor_scope(pub):
-    """Sets pub["vendor_id"] (None = unscoped) and pub["viewer_token"].
+    """Sets pub["vendor_id"] (None = unscoped), pub["viewer_token"], and pub["vendor_name"].
     Refuses the request with 403 when a vendor link has no valid token."""
-    pub["vendor_id"], pub["viewer_token"] = None, None
-    if not VENDOR_SCOPE_ENFORCE or pub.get("role") != "vendor":
-        return
+    pub["vendor_id"], pub["viewer_token"], pub["vendor_name"] = None, None, None
     if not has_request_context():
         return  # callers outside a request (the scheduler) must check pub["role"] themselves
+
+    # Extract vendor_name from header or query string if provided
+    req_vname = request.headers.get("X-Vendor-Name") or request.args.get("vendor_name") or ""
+    if req_vname:
+        pub["vendor_name"] = str(req_vname).strip()
+
     raw = request.headers.get("X-Viewer-Token") or request.args.get("vt") or ""
+
+    if not VENDOR_SCOPE_ENFORCE or pub.get("role") != "vendor":
+        # Even when not strictly enforced, if a viewer token is provided on vendor link, parse it
+        if raw and pub.get("role") == "vendor":
+            for s in [JWT_SECRET, JWT_SECRET + "  ", JWT_SECRET.strip(), JWT_SECRET.strip() + "  "]:
+                try:
+                    claims = jwt.decode(raw, s, algorithms=["HS256"], audience=VENDOR_TOKEN_AUD, options={"require": ["exp", "aud"]})
+                    if claims:
+                        vid = claims.get("vendor_id")
+                        if vid is not None:
+                            pub["vendor_id"] = str(vid)
+                        vn = claims.get("vendor_name") or claims.get("name") or claims.get("legal_name") or claims.get("vendor") or claims.get("company_name")
+                        if vn and not pub.get("vendor_name"):
+                            pub["vendor_name"] = str(vn).strip()
+                        pub["viewer_token"] = raw
+                        break
+                except Exception:
+                    continue
+        return
 
     def refuse(msg):
         abort(make_response(jsonify(error=msg), 403))
@@ -1277,20 +1414,55 @@ def _attach_vendor_scope(pub):
     if vendor_id in (None, ""):
         refuse("this report link is not valid for your account")
     pub["vendor_id"], pub["viewer_token"] = str(vendor_id), raw
+    vn = claims.get("vendor_name") or claims.get("name") or claims.get("legal_name") or claims.get("vendor") or claims.get("company_name")
+    if vn and not pub.get("vendor_name"):
+        pub["vendor_name"] = str(vn).strip()
 
 
 def _vendor_force(pub):
-    if not pub.get("vendor_id"):
+    if not pub:
         return None
-    return {"column": VENDOR_SCOPE_COLUMN, "value": pub["vendor_id"], "via": VENDOR_SCOPE_VIA}
+    role = pub.get("role")
+    vendor_id = pub.get("vendor_id")
+    vendor_name = pub.get("vendor_name")
+    if vendor_id:
+        return {
+            "column": VENDOR_SCOPE_COLUMN,
+            "value": str(vendor_id),
+            "via": VENDOR_SCOPE_VIA,
+            "role": role or "vendor",
+            "vendor_name": vendor_name,
+        }
+    if role == "vendor" or vendor_name:
+        return {
+            "column": VENDOR_SCOPE_COLUMN,
+            "value": None,
+            "via": VENDOR_SCOPE_VIA,
+            "role": "vendor",
+            "vendor_name": vendor_name,
+        }
+    if role in ("employee", "admin"):
+        return {
+            "role": role,
+            "column": None,
+            "value": None,
+            "via": None,
+            "vendor_name": None,
+        }
+    return None
 
 
 def _public_page_url(frontend_base_url, key, token, pub):
     """The URL the headless browser renders for PDFs; carries the viewer
     token so the rendered page is scoped exactly like the viewer's own."""
     url = f"{frontend_base_url}/r/{key}/{token}"
+    params = []
     if pub.get("viewer_token"):
-        url += "?vt=" + quote(pub["viewer_token"], safe="")
+        params.append("vt=" + quote(pub["viewer_token"], safe=""))
+    if pub.get("vendor_name"):
+        params.append("vendor_name=" + quote(pub["vendor_name"], safe=""))
+    if params:
+        url += "?" + "&".join(params)
     return url
 
 

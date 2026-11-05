@@ -5,11 +5,14 @@ import Chart from "../charts/Chart.jsx";
 import api from "../api.js";
 import { cleanHeading } from "./Box.jsx";
 
-const viewerToken = new URLSearchParams(window.location.search).get("vt") || "";
+const _urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+const viewerToken = _urlParams.get("vt") || "";
+const vendorNameParam = _urlParams.get("vendor_name") || _urlParams.get("vendor") || "";
 
-const viewerHeaders = viewerToken
-  ? { "X-Viewer-Token": viewerToken }
-  : {};
+const viewerHeaders = {
+  ...(viewerToken ? { "X-Viewer-Token": viewerToken } : {}),
+  ...(vendorNameParam ? { "X-Vendor-Name": vendorNameParam } : {}),
+};
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 function formatSlugUrl(slug, action = "") {
@@ -21,6 +24,9 @@ function formatSlugUrl(slug, action = "") {
   }
   if (viewerToken) {
     url += (url.includes("?") ? "&" : "?") + `vt=${encodeURIComponent(viewerToken)}`;
+  }
+  if (vendorNameParam) {
+    url += (url.includes("?") ? "&" : "?") + `vendor_name=${encodeURIComponent(vendorNameParam)}`;
   }
   return url;
 }

@@ -18,12 +18,23 @@ export const hasToken = () => !!token;
 /* A vendor portal opens published links with ?vt=<signed viewer token>.
    It rides along on every request so the backend can scope data to that
    vendor. Absent on designer pages and on non-vendor links. */
-const viewerToken = new URLSearchParams(window.location.search).get("vt") || "";
-const viewerHeaders = viewerToken ? { "X-Viewer-Token": viewerToken } : {};
+const _urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+const viewerToken = _urlParams.get("vt") || "";
+const vendorNameParam = _urlParams.get("vendor_name") || _urlParams.get("vendor") || "";
+const viewerHeaders = {
+  ...(viewerToken ? { "X-Viewer-Token": viewerToken } : {}),
+  ...(vendorNameParam ? { "X-Vendor-Name": vendorNameParam } : {}),
+};
 
 function withViewerToken(path) {
-  if (!viewerToken || path.includes("vt=")) return path;
-  return path + (path.includes("?") ? "&" : "?") + `vt=${encodeURIComponent(viewerToken)}`;
+  let res = path;
+  if (viewerToken && !res.includes("vt=")) {
+    res += (res.includes("?") ? "&" : "?") + `vt=${encodeURIComponent(viewerToken)}`;
+  }
+  if (vendorNameParam && !res.includes("vendor_name=")) {
+    res += (res.includes("?") ? "&" : "?") + `vendor_name=${encodeURIComponent(vendorNameParam)}`;
+  }
+  return res;
 }
 
 async function call(path, options = {}) {

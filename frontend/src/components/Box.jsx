@@ -2189,7 +2189,7 @@ React.useEffect(() => {
 
     return (
       <>
-        <div className="kpi" style={{ color: c.tone || "#1A2326", fontSize: dynamicFontSize }}>
+        <div className="kpi" style={{ color: c.tone || "#1A2326", fontSize: dynamicFontSize, lineHeight: 1.25, wordBreak: "break-word" }}>
           {c.prefix}{shown}{c.suffix}
           {c.unit && <span className="kpi-unit">{c.unit}</span>}
         </div>
@@ -4355,24 +4355,31 @@ function ValueData({ box, set }) {
         options={[["data", "Database column"], ["formula", "An Excel formula"],
           ["manual", "Text / value I type"]]} />
       {c.source === "data" && (
-        <Row style={{ marginTop: 9 }}>
-          <Field label="Show">
-            <Select value={c.agg || "FIRST"}
-              options={[
-                ["FIRST", "First / Text value"],
-                ["SUM", "Sum"],
-                ["AVG", "Average"],
-                ["COUNT", "Count"],
-                ["COUNT DISTINCT", "Unique count"],
-                ["MAX", "Maximum / Latest"],
-                ["MIN", "Minimum / Earliest"],
-              ]}
-              onChange={(v) => set("value.agg", v)} />
-          </Field>
-          <Field label="Of column">
-            <Select value={c.column} options={cols} onChange={(v) => set("value.column", v)} />
-          </Field>
-        </Row>
+        <>
+          <Row style={{ marginTop: 9 }}>
+            <Field label="Show">
+              <Select value={c.agg || "FIRST"}
+                options={[
+                  ["FIRST", "First / Text value"],
+                  ["SUM", "Sum"],
+                  ["AVG", "Average"],
+                  ["COUNT", "Count"],
+                  ["COUNT DISTINCT", "Unique count"],
+                  ["MAX", "Maximum / Latest"],
+                  ["MIN", "Minimum / Earliest"],
+                ]}
+                onChange={(v) => set("value.agg", v)} />
+            </Field>
+            <Field label="Of column">
+              <Select value={c.column} options={cols} onChange={(v) => set("value.column", v)} />
+            </Field>
+          </Row>
+          <Switch
+            on={c.showVendorNameOnVendorLogin !== false}
+            label="Auto-show vendor name on vendor login (total count for admin/employee)"
+            onChange={(v) => set("value.showVendorNameOnVendorLogin", v)}
+          />
+        </>
       )}
       {c.source === "manual" && (
         <>

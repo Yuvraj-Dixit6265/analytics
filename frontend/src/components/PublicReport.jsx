@@ -2,17 +2,19 @@ import React from "react";
 import { StoreProvider, useStore } from "../store.jsx";
 import { normS, styleObj, frameStyle, fmtCell, fmtNumber } from "../model.js";
 import Chart from "../charts/Chart.jsx";
-import api from "../api.js";
+import api, { getClientVendorName } from "../api.js";
 import { cleanHeading } from "./Box.jsx";
 
 const _urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
 const viewerToken = _urlParams.get("vt") || "";
-const vendorNameParam = _urlParams.get("vendor_name") || _urlParams.get("vendor") || "";
 
-const viewerHeaders = {
-  ...(viewerToken ? { "X-Viewer-Token": viewerToken } : {}),
-  ...(vendorNameParam ? { "X-Vendor-Name": vendorNameParam } : {}),
-};
+function getViewerHeaders() {
+  const vName = getClientVendorName();
+  return {
+    ...(viewerToken ? { "X-Viewer-Token": viewerToken } : {}),
+    ...(vName ? { "X-Vendor-Name": vName } : {}),
+  };
+}
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
 
 function formatSlugUrl(slug, action = "") {
@@ -25,15 +27,16 @@ function formatSlugUrl(slug, action = "") {
   if (viewerToken) {
     url += (url.includes("?") ? "&" : "?") + `vt=${encodeURIComponent(viewerToken)}`;
   }
-  if (vendorNameParam) {
-    url += (url.includes("?") ? "&" : "?") + `vendor_name=${encodeURIComponent(vendorNameParam)}`;
+  const vName = getClientVendorName();
+  if (vName) {
+    url += (url.includes("?") ? "&" : "?") + `vendor_name=${encodeURIComponent(vName)}`;
   }
   return url;
 }
 
 async function getPublishedReport(slug) {
   const res = await fetch(formatSlugUrl(slug), {
-    headers: viewerHeaders,
+    headers: getViewerHeaders(),
   });
 
   const text = await res.text();
@@ -57,7 +60,7 @@ async function executePublished(slug, definition, filters = {}) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...viewerHeaders,
+      ...getViewerHeaders(),
     },
     body: JSON.stringify({ filters }),
   });
@@ -533,17 +536,39 @@ function PublicBoxBody({
     }
 
     let shown;
+    const isVendorKpi = (
+      c.showVendorNameOnVendorLogin !== false &&
+      (
+        ["VENDOR", "VENDORS", "TOTAL VENDOR", "TOTAL VENDORS", "VENDOR NAME"].includes((box.title || "").trim().toUpperCase()) ||
+        ["vendor_id", "vendor_name", "vendor_bpno", "vendor", "vendor_no", "vendor_code"].includes((c.column || "").trim().toLowerCase())
+      )
+    );
+    const clientVName = getClientVendorName();
+
     if (c.source === "manual") {
       shown = c.manual || "";
     } else {
       const v = result?.value;
       const isNum = v !== null && v !== undefined && v !== "" && typeof v === "number";
       const isNumericStr = typeof v === "string" && v.trim() !== "" && !isNaN(v) && !isNaN(parseFloat(v));
-      shown = (v === null || v === undefined || v === "")
-        ? "—"
-        : (isNum || isNumericStr)
-          ? formatNumber(v, c.decimals, locale)
-          : String(v);
+
+      if (isVendorKpi && (viewerToken || clientVName)) {
+        if (v && typeof v === "string" && isNaN(v) && v !== "—") {
+          shown = v;
+        } else if (clientVName) {
+          shown = clientVName;
+        } else if (v !== null && v !== undefined && v !== "") {
+          shown = String(v);
+        } else {
+          shown = "—";
+        }
+      } else {
+        shown = (v === null || v === undefined || v === "")
+          ? "—"
+          : (isNum || isNumericStr)
+            ? formatNumber(v, c.decimals, locale)
+            : String(v);
+      }
     }
 
     const textVal = String(shown || "");

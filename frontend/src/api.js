@@ -18,21 +18,70 @@ export const hasToken = () => !!token;
 /* A vendor portal opens published links with ?vt=<signed viewer token>.
    It rides along on every request so the backend can scope data to that
    vendor. Absent on designer pages and on non-vendor links. */
+export function getClientVendorName() {
+  if (typeof window === "undefined") return "";
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const fromUrl = urlParams.get("vendor_name") || urlParams.get("vendor");
+    if (fromUrl && fromUrl.trim() && !/^\d+$/.test(fromUrl.trim())) return fromUrl.trim();
+
+    // 1. Check parent window document if same origin (e.g. nexdsupportal.in navbar)
+    if (window.parent && window.parent !== window) {
+      try {
+        const parentText = window.parent.document.body.innerText || "";
+        // Match "<BP_NO> - <VENDOR_NAME>" (e.g. 2100431 - GENUINE HYDRAULICS or 2100354 - PUSH-UP TOOLS UDYOG PVT LTD)
+        const m = parentText.match(/\b\d{5,12}\s*[-–]\s*([A-Za-z0-9\s.,&'()\/-]+)/);
+        if (m && m[1]) {
+          const cand = m[1].split("\n")[0].trim();
+          if (cand && cand.length >= 2 && cand.length < 90 && !/^\d+$/.test(cand)) {
+            return cand;
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Check localStorage / sessionStorage
+    for (const storage of [window.localStorage, window.sessionStorage]) {
+      if (!storage) continue;
+      for (const k of ["vendor_name", "vendorName", "vendor", "legal_name", "company_name", "user", "profile", "auth", "account"]) {
+        const val = storage.getItem(k);
+        if (!val) continue;
+        try {
+          const obj = JSON.parse(val);
+          const name = obj?.vendor_name || obj?.vendorName || obj?.legal_name || obj?.company_name || obj?.name || (typeof obj?.vendor === "string" ? obj.vendor : obj?.vendor?.name);
+          if (name && typeof name === "string" && name.trim() && !/^\d+$/.test(name.trim())) {
+            return name.trim();
+          }
+        } catch {
+          if (typeof val === "string" && val.trim().length >= 2 && val.trim().length < 90 && !/^\d+$/.test(val.trim())) {
+            return val.trim();
+          }
+        }
+      }
+    }
+  } catch (e) {}
+  return "";
+}
+
 const _urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
 const viewerToken = _urlParams.get("vt") || "";
-const vendorNameParam = _urlParams.get("vendor_name") || _urlParams.get("vendor") || "";
-const viewerHeaders = {
-  ...(viewerToken ? { "X-Viewer-Token": viewerToken } : {}),
-  ...(vendorNameParam ? { "X-Vendor-Name": vendorNameParam } : {}),
-};
+
+function getViewerHeaders() {
+  const vName = getClientVendorName();
+  return {
+    ...(viewerToken ? { "X-Viewer-Token": viewerToken } : {}),
+    ...(vName ? { "X-Vendor-Name": vName } : {}),
+  };
+}
 
 function withViewerToken(path) {
   let res = path;
   if (viewerToken && !res.includes("vt=")) {
     res += (res.includes("?") ? "&" : "?") + `vt=${encodeURIComponent(viewerToken)}`;
   }
-  if (vendorNameParam && !res.includes("vendor_name=")) {
-    res += (res.includes("?") ? "&" : "?") + `vendor_name=${encodeURIComponent(vendorNameParam)}`;
+  const vName = getClientVendorName();
+  if (vName && !res.includes("vendor_name=")) {
+    res += (res.includes("?") ? "&" : "?") + `vendor_name=${encodeURIComponent(vName)}`;
   }
   return res;
 }
@@ -44,7 +93,7 @@ async function call(path, options = {}) {
     ...rest,
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...viewerHeaders,
+      ...getViewerHeaders(),
       ...(body !== undefined
         ? { "Content-Type": "application/json" }
         : {}),

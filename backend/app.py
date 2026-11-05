@@ -435,13 +435,15 @@ def _catalogue(conn_row):
     return db.catalogue_index(db.introspect(conn_row))
 
 
-def _get_vendor_name(conn_row, cat, vendor_id, base_table=None, rows=None):
+def _get_vendor_name(conn_row, cat, vendor_id, base_table=None, rows=None, definition=None):
     if rows:
         for r in rows:
             for k, v in r.items():
                 clean_k = k.split(".")[-1].split("__")[-1].lower()
-                if clean_k in ("vendor_name", "legal_name", "vendor_bpname", "supplier_name", "vendor") and v:
-                    return str(v).strip()
+                if clean_k in ("vendor_name", "legal_name", "company_name", "vendor_bpname", "bp_name", "supplier_name", "vendor", "name1", "name2", "party_name") and v:
+                    val_str = str(v).strip()
+                    if val_str and not val_str.isdigit():
+                        return val_str
 
     if not vendor_id:
         return None
@@ -449,63 +451,140 @@ def _get_vendor_name(conn_row, cat, vendor_id, base_table=None, rows=None):
     s_id = str(vendor_id).strip()
     if " - " in s_id:
         parts = s_id.split(" - ", 1)
-        if len(parts) > 1 and parts[1].strip():
+        if len(parts) > 1 and parts[1].strip() and not parts[1].strip().isdigit():
             return parts[1].strip()
         s_id = parts[0].strip()
 
-    # Check vendor_master table in connected DB
-    vm_cols = cat.get("vendor_master", set())
-    name_cols = [c for c in ("vendor_name", "legal_name", "name") if c in vm_cols]
-    if name_cols:
-        for nc in name_cols:
-            for idc in ("vendor_id", "bp_no", "bp_number", "company_id", "id"):
-                if idc in vm_cols:
-                    try:
-                        sql = f"SELECT `{nc}` AS name FROM `vendor_master` WHERE `{idc}` = %s AND `{nc}` IS NOT NULL AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
-                        res = db.run_report_query(conn_row, sql, (s_id,))
-                        if res and res[0].get("name"):
-                            return str(res[0]["name"]).strip()
-                    except Exception:
-                        pass
+    candidate_ids = [s_id]
+    stripped_id = s_id.lstrip("0")
+    if stripped_id and stripped_id not in candidate_ids:
+        candidate_ids.append(stripped_id)
+    padded_id = s_id.zfill(10)
+    if padded_id not in candidate_ids:
+        candidate_ids.append(padded_id)
+    if s_id.isdigit():
+        try:
+            candidate_ids.append(int(s_id))
+        except Exception:
+            pass
 
-    # Check base table if it has vendor_name and vendor_id / vendor_bpno
-    if base_table and base_table in cat:
-        b_cols = cat[base_table]
-        nc = next((c for c in ("vendor_name", "legal_name", "vendor_bpname", "supplier_name", "name") if c in b_cols), None)
-        idc = next((c for c in ("vendor_id", "vendor_bpno", "vendor_code", "vendor_no", "bp_no", "bp_number") if c in b_cols), None)
-        if nc and idc:
+    name_col_candidates = (
+        "vendor_name", "legal_name", "company_name", "vendor_bpname", "bp_name",
+        "supplier_name", "party_name", "name1", "name2", "name", "trade_name",
+        "vendor_desc", "vendor_description", "vendor"
+    )
+    id_col_candidates = (
+        "vendor_id", "bp_no", "vendor_bpno", "vendor_code", "vendor_no",
+        "bp_number", "company_id", "cardcode", "supplier_id", "lifnr", "id"
+    )
+
+    def _try_query(tbl, name_col, id_col):
+        for cid in candidate_ids:
             try:
-                sql = f"SELECT DISTINCT `{nc}` AS name FROM `{base_table}` WHERE `{idc}` = %s AND `{nc}` IS NOT NULL AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
-                res = db.run_report_query(conn_row, sql, (s_id,))
+                sql = (
+                    f"SELECT DISTINCT `{name_col}` AS name FROM `{tbl}` "
+                    f"WHERE `{id_col}` = %s AND `{name_col}` IS NOT NULL "
+                    f"AND TRIM(CAST(`{name_col}` AS CHAR)) != '' LIMIT 1"
+                )
+                res = db.run_report_query(conn_row, sql, (cid,))
                 if res and res[0].get("name"):
-                    return str(res[0]["name"]).strip()
+                    nm = str(res[0]["name"]).strip()
+                    if nm and not nm.isdigit():
+                        return nm
             except Exception:
                 pass
-        if nc:
+        return None
+
+    # 1. Check vendor_master table (including join to supplier_registration if applicable)
+    vm_cols = cat.get("vendor_master", set())
+    if vm_cols:
+        for nc in [c for c in name_col_candidates if c in vm_cols]:
+            for idc in [c for c in id_col_candidates if c in vm_cols]:
+                found = _try_query("vendor_master", nc, idc)
+                if found:
+                    return found
+
+        sr_cols = cat.get("supplier_registration", set())
+        if sr_cols and "supplier_registration_id" in vm_cols:
+            sr_name_cols = [c for c in name_col_candidates if c in sr_cols]
+            sr_id_col = "id" if "id" in sr_cols else "company_id" if "company_id" in sr_cols else None
+            vm_id_cols = [c for c in id_col_candidates if c in vm_cols]
+            if sr_name_cols and sr_id_col and vm_id_cols:
+                for snc in sr_name_cols:
+                    for vidc in vm_id_cols:
+                        for cid in candidate_ids:
+                            try:
+                                sql = (
+                                    f"SELECT DISTINCT `sr`.`{snc}` AS name "
+                                    f"FROM `vendor_master` `vm` "
+                                    f"JOIN `supplier_registration` `sr` ON `sr`.`{sr_id_col}` = `vm`.`supplier_registration_id` "
+                                    f"WHERE `vm`.`{vidc}` = %s AND `sr`.`{snc}` IS NOT NULL "
+                                    f"AND TRIM(CAST(`sr`.`{snc}` AS CHAR)) != '' LIMIT 1"
+                                )
+                                res = db.run_report_query(conn_row, sql, (cid,))
+                                if res and res[0].get("name"):
+                                    nm = str(res[0]["name"]).strip()
+                                    if nm and not nm.isdigit():
+                                        return nm
+                            except Exception:
+                                pass
+
+    # 2. Check supplier_registration directly
+    sr_cols = cat.get("supplier_registration", set())
+    if sr_cols:
+        for nc in [c for c in name_col_candidates if c in sr_cols]:
+            for idc in [c for c in id_col_candidates if c in sr_cols]:
+                found = _try_query("supplier_registration", nc, idc)
+                if found:
+                    return found
+
+    # 3. Check base table of the box and all tables in definition
+    report_tables = []
+    if base_table and base_table in cat:
+        report_tables.append(base_table)
+    if definition:
+        for sec in definition.get("sections", []):
+            for b in sec.get("boxes", []):
+                bt = (b.get("src") or {}).get("base")
+                if bt and bt in cat and bt not in report_tables:
+                    report_tables.append(bt)
+                for j in (b.get("src") or {}).get("joins") or []:
+                    jt = j.get("table")
+                    if jt and jt in cat and jt not in report_tables:
+                        report_tables.append(jt)
+
+    for tbl in report_tables:
+        t_cols = cat[tbl]
+        for nc in [c for c in name_col_candidates if c in t_cols]:
+            for idc in [c for c in id_col_candidates if c in t_cols]:
+                found = _try_query(tbl, nc, idc)
+                if found:
+                    return found
             try:
-                cond = vendor_condition(cat, base_table, VENDOR_SCOPE_COLUMN, s_id, VENDOR_SCOPE_VIA)
+                cond = vendor_condition(cat, tbl, VENDOR_SCOPE_COLUMN, s_id, VENDOR_SCOPE_VIA)
                 if cond:
-                    sql = f"SELECT DISTINCT `{nc}` AS name FROM `{base_table}` WHERE {cond[0]} AND `{nc}` IS NOT NULL AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
+                    sql = (
+                        f"SELECT DISTINCT `{nc}` AS name FROM `{tbl}` "
+                        f"WHERE {cond[0]} AND `{nc}` IS NOT NULL "
+                        f"AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
+                    )
                     res = db.run_report_query(conn_row, sql, tuple(cond[1]))
                     if res and res[0].get("name"):
-                        return str(res[0]["name"]).strip()
+                        nm = str(res[0]["name"]).strip()
+                        if nm and not nm.isdigit():
+                            return nm
             except Exception:
                 pass
 
-    # Check any table with vendor_name and vendor_id
+    # 4. Check all other tables in catalogue
     for tbl, cols in cat.items():
-        if tbl in ("users", "publications", "data_connections"):
+        if tbl in ("users", "publications", "data_connections", "process_versions", "processes") or tbl in report_tables or tbl == "vendor_master":
             continue
-        nc = next((c for c in ("vendor_name", "legal_name", "vendor_bpname") if c in cols), None)
-        idc = next((c for c in ("vendor_id", "vendor_bpno", "bp_no", "bp_number") if c in cols), None)
-        if nc and idc:
-            try:
-                sql = f"SELECT `{nc}` AS name FROM `{tbl}` WHERE `{idc}` = %s AND `{nc}` IS NOT NULL AND TRIM(CAST(`{nc}` AS CHAR)) != '' LIMIT 1"
-                res = db.run_report_query(conn_row, sql, (s_id,))
-                if res and res[0].get("name"):
-                    return str(res[0]["name"]).strip()
-            except Exception:
-                pass
+        for nc in [c for c in name_col_candidates if c in cols]:
+            for idc in [c for c in id_col_candidates if c in cols]:
+                found = _try_query(tbl, nc, idc)
+                if found:
+                    return found
 
     return None
 
@@ -620,11 +699,11 @@ def _run_box(box, definition, state, conn_row, cat, role_row, values, force=None
         if is_vendor_kpi and is_vendor_view:
             v_name = force.get("vendor_name")
             if not v_name:
-                v_name = _get_vendor_name(conn_row, cat, force.get("value"), base_table=box.get("src", {}).get("base"), rows=rows)
+                v_name = _get_vendor_name(conn_row, cat, force.get("value"), base_table=box.get("src", {}).get("base"), rows=rows, definition=definition)
             if v_name:
                 return {"value": v_name}
             elif force.get("value"):
-                return {"value": force.get("value")}
+                return {"value": str(force.get("value"))}
 
         # 2. On Employee and Admin login: show total number of vendor only
         if is_vendor_kpi and not is_vendor_view:

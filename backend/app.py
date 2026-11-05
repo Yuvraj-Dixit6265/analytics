@@ -785,6 +785,21 @@ def _clean_header(name):
     return col
 
 
+def _clean_invoice_number(val):
+    if not isinstance(val, str):
+        return val
+    s = val.strip()
+    if re.search(r"^INV[\s_\-]", s, re.I) or re.search(r"^INV\d", s, re.I):
+        s = re.sub(r"^INV[\s_\-]*", "", s, flags=re.I)
+        s = re.sub(r"[\s_\-]*20\d\d\s*$", "", s)
+        return s.strip().strip("_").strip()
+    if re.search(r"[\s_\-]20\d\d\s*$", s) and re.search(r"\d{4,}", s) and not re.search(r"^[A-Za-z]{3}|^\d{1,2}[-\s][A-Za-z]{3}", s):
+        s = re.sub(r"[\s_\-]*20\d\d\s*$", "", s)
+        s = re.sub(r"^INV[\s_\-]*", "", s, flags=re.I)
+        return s.strip().strip("_").strip()
+    return val
+
+
 def _render_boxes(definition, results):
     """Merge each box's definition (title, kind, formatting) with its
     computed result into one flat, format-agnostic shape — the shared input
@@ -833,7 +848,7 @@ def _render_boxes(definition, results):
                             val = r.get(col_key.replace(".", "_"))
                         if val is None and "." in col_key:
                             val = r.get(col_key.split(".")[-1])
-                        row_vals.append(val)
+                        row_vals.append(_clean_invoice_number(val))
                     rows.append(row_vals)
                 entry["rows"] = [headers] + rows
             elif box.get("kind") == "manualTable":

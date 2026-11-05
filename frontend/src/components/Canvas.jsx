@@ -306,7 +306,7 @@ function Filter({ filter: f, index }) {
   };
 
   return (
-    <div className={`fchip w-${f.width || "auto"}${wide ? " w-wide" : ""}${selected ? " sel" : ""}`}
+    <div className={`fchip w-${f.width || "auto"}${wide ? " w-wide" : ""}${selected ? " sel" : ""}${pos === "left" ? " has-pos-left" : ""}`}
       style={fst.bg ? { background: fst.bg } : undefined}
       onMouseDown={(e) => {
         if (!design) return;
@@ -329,17 +329,19 @@ function Filter({ filter: f, index }) {
       )}
 
       <div className={`fbody pos-${pos}`} style={{ gap: `${gap}px` }}>
-        <Editable
-          className={`fname${pos === "hidden" ? " lbl-hidden" : ""}`}
-          value={f.label}
-          placeholder="Label"
-          editable={design}
-          style={labelStyle}
-          onChange={(v) => set("label", v)}
-        />
-        {f.colon && pos !== "hidden" && (
-          <span className="fcolon" style={styleObj(fst, { bg: true })}>:</span>
-        )}
+        <div className="flabel-wrap" style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", flex: "0 0 auto", gap: "2px" }}>
+          <Editable
+            className={`fname${pos === "hidden" ? " lbl-hidden" : ""}`}
+            value={f.label}
+            placeholder="Label"
+            editable={design}
+            style={labelStyle}
+            onChange={(v) => set("label", v)}
+          />
+          {f.colon && pos !== "hidden" && (
+            <span className="fcolon" style={{ marginLeft: "2px", ...styleObj(fst, { bg: true }) }}>:</span>
+          )}
+        </div>
         <div className="fctrl" style={cw ? { flex: `0 0 ${cw}px`, width: `${cw}px` } : undefined}>
           <div style={styleObj(cst)}><Control filter={f} /></div>
         </div>

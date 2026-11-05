@@ -981,13 +981,36 @@ def _distinct_column_options(conn_row, table, column, vendor_id=None):
         LIMIT 1000
     """
 
+    COMPANY_CODE_MAP = {
+        "1000": "Ankit Aerospace Private Limited",
+        "2000": "Ankit Fasteners Private Limited",
+    }
+    is_company_col = any(
+        k in column.lower().replace("_", "")
+        for k in ("companycode", "companyid", "bukrs")
+    ) or "company" in column.lower()
+
     try:
         rows = db.run_report_query(conn_row, sql, vendor_params)
-        options = [
-            {"value": str(r["value"]), "label": str(r["value"])}
-            for r in rows
-            if r.get("value") is not None
-        ]
+        options = []
+        seen_vals = set()
+        for r in rows:
+            if r.get("value") is None:
+                continue
+            val_str = str(r["value"]).strip()
+            if not val_str or val_str in seen_vals:
+                continue
+            seen_vals.add(val_str)
+            if is_company_col and val_str in COMPANY_CODE_MAP:
+                options.append({"value": val_str, "label": f"{val_str} - {COMPANY_CODE_MAP[val_str]}"})
+            else:
+                options.append({"value": val_str, "label": val_str})
+
+        if is_company_col:
+            for code, name in COMPANY_CODE_MAP.items():
+                if code not in seen_vals:
+                    options.append({"value": code, "label": f"{code} - {name}"})
+
         return jsonify(options=options)
     except Exception as exc:
         return jsonify(error=f"could not load filter options: {str(exc)[:300]}"), 502

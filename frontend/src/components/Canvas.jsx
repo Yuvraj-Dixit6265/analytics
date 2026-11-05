@@ -308,11 +308,41 @@ function SectionNavigation() {
     </div>
   );
 }
+function getFilterSortWeight(f) {
+  const label = String(f.label || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const col = String(f.column || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  // 1. Company code
+  if (label.includes("company") || col.includes("company") || col.includes("bukrs")) {
+    return 1;
+  }
+  // 2. Status
+  if (label.includes("status") || col.includes("status") || f.control === "status-tabs") {
+    return 2;
+  }
+  // 3. Doc types
+  if (label.includes("doc") || col.includes("doc") || label.includes("type") || col.includes("type")) {
+    return 3;
+  }
+  // 4. Date
+  if (f.control === "date" || f.control === "daterange" || label.includes("date") || col.includes("date")) {
+    return 4;
+  }
+  return 5;
+}
+
 function FilterBar() {
   const { state, dispatch } = useStore();
   const design = state.mode === "design";
   const hasFilters = Boolean(state.doc.filters?.length);
   if (!design && !hasFilters) return null;
+
+  // Sequence: Search first then company code then status then doc types then date
+  const orderedFilters = React.useMemo(() => {
+    return [...(state.doc.filters || [])].sort((a, b) => {
+      return getFilterSortWeight(a) - getFilterSortWeight(b);
+    });
+  }, [state.doc.filters]);
 
   return (
     <div className="fbar">
@@ -321,8 +351,8 @@ function FilterBar() {
           No filters yet — add one and name it in place.
         </div>
       )}
-      {state.doc.filters.map((f, i) => <Filter key={f.id} filter={f} index={i} />)}
 
+      {/* 1. Search First */}
       <div className="fbar-search-chip">
         <div className="fbar-search-inner">
           <svg className="fbar-search-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -348,6 +378,11 @@ function FilterBar() {
           )}
         </div>
       </div>
+
+      {/* 2. Company code, 3. Status, 4. Doc types, 5. Date */}
+      {orderedFilters.map((f, i) => (
+        <Filter key={f.id} filter={f} index={i} />
+      ))}
 
       {(design || Object.keys(state.filterState).length > 0 || state.searchTerm) && (
         <div className="fbar-add">
@@ -596,11 +631,54 @@ function datePresetRange(preset) {
 
   return {};
 }
+const COMPANY_CODE_MAP = {
+  "1000": "Ankit Aerospace Private Limited",
+  "2000": "Ankit Fasteners Private Limited",
+};
+
+export function formatCompanyOption(val, label) {
+  const strVal = String(val ?? "").trim();
+  const strLabel = String(label ?? strVal).trim();
+  if (COMPANY_CODE_MAP[strVal]) {
+    if (!strLabel.includes(" - ")) {
+      return `${strVal} - ${COMPANY_CODE_MAP[strVal]}`;
+    }
+  }
+  return strLabel || strVal;
+}
+
 function Control({ filter: f }) {
   const { state, dispatch } = useStore();
   const value = state.filterState[f.id];
-  const options = useOptions(f);
+  const rawOptions = useOptions(f);
   const set = (v) => dispatch({ type: "filterValue", id: f.id, value: v });
+
+  const isCompanyCode =
+    String(f.label || "").toLowerCase().replace(/[^a-z0-9]/g, "").includes("company") ||
+    String(f.column || "").toLowerCase().replace(/[^a-z0-9]/g, "").includes("company") ||
+    String(f.column || "").toLowerCase().includes("bukrs");
+
+  const options = React.useMemo(() => {
+    if (!isCompanyCode) return rawOptions;
+    const existing = new Set();
+    const mapped = (rawOptions || []).map((o) => {
+      const val = String(o.value ?? "").trim();
+      existing.add(val);
+      return {
+        ...o,
+        label: formatCompanyOption(val, o.label),
+      };
+    });
+    for (const [code, name] of Object.entries(COMPANY_CODE_MAP)) {
+      if (!existing.has(code)) {
+        mapped.push({
+          value: code,
+          label: `${code} - ${name}`,
+        });
+      }
+    }
+    return mapped;
+  }, [rawOptions, isCompanyCode]);
 
   switch (f.control) {
     case "text":

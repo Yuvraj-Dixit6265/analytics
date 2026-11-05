@@ -743,13 +743,14 @@ def build_pptx(name, sections):
 def build_xlsx(name, sections):
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
 
     wb = Workbook()
     wb.remove(wb.active)
     used = set()
 
     for sec in sections:
-        base = re.sub(r"[\[\]\*\?/\\:]", "", sec["name"] or "Section")[:28] or "Section"
+        base = re.sub(r"[\[\]\*\?/\\:]", "", sec.get("name") or "Section")[:28] or "Section"
         sheet_name, i = base, 2
         while sheet_name in used:
             sheet_name = f"{base[:26]}-{i}"
@@ -758,20 +759,23 @@ def build_xlsx(name, sections):
         ws = wb.create_sheet(sheet_name)
 
         row = 1
-        for box in sec["boxes"]:
-            ws.cell(row=row, column=1, value=box["title"] or "Untitled").font = Font(bold=True)
+        max_col_used = 1
+        for box in sec.get("boxes", []):
+            ws.cell(row=row, column=1, value=box.get("title") or "Untitled").font = Font(bold=True)
             row += 1
             if box.get("error"):
                 ws.cell(row=row, column=1, value=f"Error: {box['error']}")
                 row += 2
                 continue
-            if box["kind"] == "value":
+            if box.get("kind") == "value":
                 ws.cell(row=row, column=1, value=box.get("text", "—"))
                 if box.get("note"):
                     ws.cell(row=row, column=2, value=box["note"])
+                    max_col_used = max(max_col_used, 2)
                 row += 2
-            elif box["kind"] in ("chart", "table") and box.get("rows"):
+            elif box.get("kind") in ("chart", "table", "reportView", "manualTable") and box.get("rows"):
                 for ri, r in enumerate(box["rows"]):
+                    max_col_used = max(max_col_used, len(r))
                     for ci, v in enumerate(r):
                         cell = ws.cell(row=row + ri, column=1 + ci, value=v)
                         if ri == 0:
@@ -781,8 +785,9 @@ def build_xlsx(name, sections):
             elif box.get("text"):
                 ws.cell(row=row, column=1, value=box["text"])
                 row += 2
-        for col_idx in range(1, 9):
-            ws.column_dimensions[chr(64 + col_idx)].width = 22
+
+        for col_idx in range(1, max(max_col_used + 1, 9)):
+            ws.column_dimensions[get_column_letter(col_idx)].width = 22
 
     if not wb.sheetnames:
         wb.create_sheet("Report")
@@ -804,20 +809,20 @@ def build_csv(name, sections):
 
     for sec in sections:
         writer.writerow([])
-        writer.writerow([sec["name"]])
+        writer.writerow([sec.get("name") or "Section"])
         if sec.get("desc"):
             writer.writerow([sec["desc"]])
 
-        for box in sec["boxes"]:
+        for box in sec.get("boxes", []):
             writer.writerow([])
-            writer.writerow([box["title"] or "Untitled"])
+            writer.writerow([box.get("title") or "Untitled"])
             if box.get("error"):
                 writer.writerow(["Error", box["error"]])
-            elif box["kind"] == "value":
+            elif box.get("kind") == "value":
                 writer.writerow(["Value", box.get("text", "—")])
                 if box.get("note"):
                     writer.writerow(["Note", box["note"]])
-            elif box["kind"] in ("chart", "table") and box.get("rows"):
+            elif box.get("kind") in ("chart", "table", "reportView", "manualTable") and box.get("rows"):
                 for row in box["rows"]:
                     writer.writerow(["—" if v is None else v for v in row])
             elif box.get("text"):

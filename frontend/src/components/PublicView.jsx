@@ -122,6 +122,9 @@ function PublicShell({ slug }) {
         <button className="pb" disabled={exporting === "pdf"} onClick={() => exportAs("pdf")}>
           {exporting === "pdf" ? "Preparing…" : "Download PDF"}
         </button>
+        <button className="pb" disabled={exporting === "xlsx"} onClick={() => exportAs("xlsx")}>
+          {exporting === "xlsx" ? "Preparing…" : "Download Excel"}
+        </button>
       </div>
       {state.error && <div className="fx bad" style={{ marginBottom: 14 }}>{state.error}</div>}
       <Canvas />

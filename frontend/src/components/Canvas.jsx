@@ -707,6 +707,127 @@ function Control({ filter: f }) {
   }
 }
 
+function FilterAutoPreview({ filter: f }) {
+  const { state } = useStore();
+  const [options, setOptions] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState(null);
+
+  React.useEffect(() => {
+    if (!f.table || !f.column) {
+      setOptions(null);
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    setErr(null);
+
+    const req = state.publicSlug
+      ? api.publicFilterOptions(state.publicSlug, f.id)
+      : state.processKey
+      ? api.filterOptions(state.processKey, f.id, f.table, f.column)
+      : Promise.resolve({ options: [] });
+
+    req
+      .then((r) => {
+        if (alive) {
+          setOptions(r.options || []);
+          setLoading(false);
+        }
+      })
+      .catch((e) => {
+        if (alive) {
+          setErr(e.message || "Failed to load options");
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [state.processKey, state.publicSlug, f.id, f.table, f.column]);
+
+  if (!f.table || !f.column) {
+    return (
+      <Hint style={{ marginTop: 8 }}>
+        Select a table and column above to load values automatically.
+      </Hint>
+    );
+  }
+
+  if (loading) {
+    return (
+      <Hint style={{ marginTop: 8, color: "var(--accent)" }}>
+        Querying distinct values from {f.table}.{f.column}…
+      </Hint>
+    );
+  }
+
+  if (err) {
+    return (
+      <Hint style={{ marginTop: 8, color: "#d9534f" }}>
+        Could not load values: {err}
+      </Hint>
+    );
+  }
+
+  if (!options || options.length === 0) {
+    return (
+      <Hint style={{ marginTop: 8 }}>
+        No distinct values found in {f.table}.{f.column}.
+      </Hint>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: "8px 10px",
+        background: "rgba(0,0,0,0.03)",
+        border: "1px solid #e0e5e3",
+        borderRadius: 6,
+        fontSize: 12,
+      }}
+    >
+      <div style={{ color: "var(--muted)", marginBottom: 6, fontWeight: 500 }}>
+        {options.length} distinct {options.length === 1 ? "value" : "values"} in{" "}
+        <code>{f.column}</code>:
+      </div>
+      <div
+        style={{
+          maxHeight: 120,
+          overflowY: "auto",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 4,
+        }}
+      >
+        {options.slice(0, 40).map((o, idx) => (
+          <span
+            key={idx}
+            style={{
+              background: "#fff",
+              border: "1px solid #d5ddda",
+              padding: "2px 6px",
+              borderRadius: 4,
+              fontSize: 11,
+              fontFamily: "var(--mono, monospace)",
+            }}
+          >
+            {String(o.label || o.value)}
+          </span>
+        ))}
+        {options.length > 40 && (
+          <span style={{ color: "var(--muted)", alignSelf: "center", fontSize: 11 }}>
+            +{options.length - 40} more
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FilterPanel({ filter: f }) {
   const { state, dispatch } = useStore();
   const [tableSearch, setTableSearch] = React.useState("");
@@ -866,13 +987,35 @@ function FilterPanel({ filter: f }) {
                 onChange={(v) => {
                   set("table", v);
                   setTableSearch("");
+                  if (f.optionSource !== "table") {
+                    set("optionSource", "auto");
+                  }
+                  if (
+                    f.list &&
+                    (f.list.includes("Pending\nApproved\nRejected") ||
+                      f.list.includes("Pending"))
+                  ) {
+                    set("list", "");
+                  }
                 }}
               />
             </Field>
             <Field label="Column">
               <Select value={f.column}
                 options={["", ...colsOf(state.catalog, f.table).map((c) => c.name)]}
-                onChange={(v) => set("column", v)} />
+                onChange={(v) => {
+                  set("column", v);
+                  if (f.optionSource !== "table") {
+                    set("optionSource", "auto");
+                  }
+                  if (
+                    f.list &&
+                    (f.list.includes("Pending\nApproved\nRejected") ||
+                      f.list.includes("Pending"))
+                  ) {
+                    set("list", "");
+                  }
+                }} />
             </Field>
           </Row>
           <Hint>Applies to every box whose tables carry a column of this name.</Hint>
@@ -958,7 +1101,7 @@ function FilterPanel({ filter: f }) {
               ) : (
                 <>
                   <Chips
-                    value={f.optionSource}
+                    value={f.optionSource || "auto"}
                     onChange={(v) => set("optionSource", v)}
                     options={[
                       ["auto", "Values in that column"],
@@ -966,6 +1109,10 @@ function FilterPanel({ filter: f }) {
                       ["list", "A list I type"]
                     ]}
                   />
+
+                  {(!f.optionSource || f.optionSource === "auto") && (
+                    <FilterAutoPreview filter={f} />
+                  )}
 
                   {f.optionSource === "table" && (
                     <Row style={{ marginTop: 8 }}>

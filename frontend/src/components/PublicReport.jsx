@@ -192,6 +192,20 @@ function PublicReportInner({ slug }) {
           Download PDF
         </a>
 
+        <a
+          className="pb go"
+          href={(() => {
+            let u = formatSlugUrl(slug, "export/xlsx");
+            if (state?.filterState && Object.keys(state.filterState).length > 0) {
+              u += (u.includes("?") ? "&" : "?") + `filters=${encodeURIComponent(JSON.stringify(state.filterState))}`;
+            }
+            return u;
+          })()}
+          download={`${(state?.doc?.name || "report").replace(/[^\w-]+/g, "-").toLowerCase()}.xlsx`}
+        >
+          Download Excel
+        </a>
+
         <button
           className="pb"
           type="button"
@@ -211,7 +225,7 @@ function PublicReportInner({ slug }) {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
-                    ...viewerHeaders,
+                    ...getViewerHeaders(),
                   },
                   body: JSON.stringify({
                     email: email.trim(),
@@ -962,7 +976,7 @@ function PublicBoxBody({
               }
               const detailUrl = `${API_BASE}/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`;
               const res = await fetch(detailUrl, {
-                headers: viewerHeaders,
+                headers: getViewerHeaders(),
               });
 
               if (!res.ok) {

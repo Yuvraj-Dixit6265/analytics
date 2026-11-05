@@ -81,9 +81,9 @@ export const blankDoc = () => ({
 });
 
 export const newFilter = (table = "") => ({
-  id: uid("flt"), label: "", control: "text", table, column: "",
-  optionSource: "list", optTable: "", optColumn: "",
-  list: "Pending\nApproved\nRejected\nDraft\nCancelled\nArchived",
+  id: uid("flt"), label: "", control: "select", table, column: "",
+  optionSource: "auto", optTable: "", optColumn: "",
+  list: "",
   value: "",
 
     autoArchive: false,
@@ -312,6 +312,19 @@ export function migrate(d) {
     // Defaults for newer status/archive features
     if (f.control === "status-tabs" && !f.list) {
       f.list = "Pending\nApproved\nRejected\nDraft\nCancelled\nArchived";
+    }
+
+    // If table & column are configured, boilerplate list should default to real column values
+    const boilerplate = [
+      "Pending\nApproved\nRejected\nDraft\nCancelled\nArchived",
+      "Pending\nApproved\nRejected",
+    ];
+    if (f.table && f.column && f.optionSource === "list" && boilerplate.includes((f.list || "").trim())) {
+      f.optionSource = "auto";
+      f.list = "";
+    }
+    if (!f.optionSource) {
+      f.optionSource = "auto";
     }
 
     if (f.autoArchive === undefined) f.autoArchive = false;

@@ -119,7 +119,7 @@ async function download(path, filename) {
   const res = await fetch(BASE + withViewerToken(path), {
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...viewerHeaders,
+      ...getViewerHeaders(),
     },
   });
 

@@ -775,10 +775,20 @@ def _execute_boxes(definition, state, conn_row, cat, allow_forms=True, force=Non
     return results
 
 
+def _clean_header(name):
+    if not name:
+        return ""
+    s = str(name).strip()
+    col = s.split(".")[-1]
+    if "_" in col:
+        return " ".join(word.capitalize() for word in col.split("_"))
+    return col
+
+
 def _render_boxes(definition, results):
     """Merge each box's definition (title, kind, formatting) with its
     computed result into one flat, format-agnostic shape — the shared input
-    for every export (PDF/PPTX/XLSX), so the three formats can't drift
+    for every export (PDF/PPTX/XLSX), so the formats can't drift
     apart from each other or from what the dashboard itself shows."""
     out = []
     for sec in definition.get("sections", []):
@@ -804,17 +814,38 @@ def _render_boxes(definition, results):
             elif box.get("kind") == "chart":
                 entry["rows"] = [["Category", "Value"]] + [
                     [d.get("label"), d.get("value")] for d in (payload.get("data") or [])]
-            elif box.get("kind") == "table":
-                cols = [c for c in (box.get("table") or {}).get("columns", [])
-                        if c.get("on", True)]
-                headers = [c.get("label") or c.get("col") for c in cols]
-                entry["rows"] = [headers] + [
-                    [r.get(c["col"]) for c in cols] for r in (payload.get("rows") or [])]
+            elif box.get("kind") in ("table", "reportView"):
+                if box.get("kind") == "reportView":
+                    cols = [c for c in (box.get("reportView") or {}).get("columns", [])
+                            if c.get("on", True)]
+                else:
+                    cols = [c for c in (box.get("table") or {}).get("columns", [])
+                            if c.get("on", True)]
+                headers = [_clean_header(c.get("label") or c.get("col")) for c in cols]
+                rows_data = payload.get("rows") or []
+                rows = []
+                for r in rows_data:
+                    row_vals = []
+                    for c in cols:
+                        col_key = c.get("col") or ""
+                        val = r.get(col_key)
+                        if val is None:
+                            val = r.get(col_key.replace(".", "_"))
+                        if val is None and "." in col_key:
+                            val = r.get(col_key.split(".")[-1])
+                        row_vals.append(val)
+                    rows.append(row_vals)
+                entry["rows"] = [headers] + rows
+            elif box.get("kind") == "manualTable":
+                mt = box.get("manualTable") or {}
+                headers = [_clean_header(c.get("label")) for c in mt.get("columns", [])]
+                rows = [r.get("cells", []) for r in mt.get("rows", [])]
+                entry["rows"] = [headers] + rows
             elif box.get("kind") == "note":
                 entry["text"] = re.sub("<[^<]+?>", "", (box.get("note") or {}).get("html", ""))
             boxes.append(entry)
-            out.append({"name": sec.get("name") or "", "desc": sec.get("desc") or "",
-                        "boxes": boxes})
+        out.append({"name": sec.get("name") or "", "desc": sec.get("desc") or "",
+                    "boxes": boxes})
     return out
 
 @app.post("/api/processes/<key>/preview-sql")
@@ -884,8 +915,12 @@ def filter_options(key, client_id):
         )
         if not filter_def:
             return jsonify(options=[])
-        table = str(filter_def.get("table") or "").strip()
-        column = str(filter_def.get("column") or "").strip()
+        if filter_def.get("optionSource") == "table" and filter_def.get("optTable") and filter_def.get("optColumn"):
+            table = str(filter_def.get("optTable") or "").strip()
+            column = str(filter_def.get("optColumn") or "").strip()
+        else:
+            table = str(filter_def.get("table") or "").strip()
+            column = str(filter_def.get("column") or "").strip()
 
     conn_row = _connection_for(row)
     return _distinct_column_options(conn_row, table, column)
@@ -1252,6 +1287,9 @@ EXPORT_KINDS = {
              exporters.build_pptx, "pptx"),
     "xlsx": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
              exporters.build_xlsx, "xlsx"),
+    "excel": ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              exporters.build_xlsx, "xlsx"),
+    "csv": ("text/csv; charset=utf-8", exporters.build_csv, "csv"),
     "table": ("application/pdf", exporters.build_table_pdf, "pdf"),
 }
 
@@ -1827,8 +1865,12 @@ def public_filter_options(key, token, client_id):
                        if f.get("id") == client_id), None)
     if not filter_def:
         return jsonify(options=[])
-    table = str(filter_def.get("table") or "").strip()
-    column = str(filter_def.get("column") or "").strip()
+    if filter_def.get("optionSource") == "table" and filter_def.get("optTable") and filter_def.get("optColumn"):
+        table = str(filter_def.get("optTable") or "").strip()
+        column = str(filter_def.get("optColumn") or "").strip()
+    else:
+        table = str(filter_def.get("table") or "").strip()
+        column = str(filter_def.get("column") or "").strip()
     return _distinct_column_options(_connection_for(cid=pub["connection_id"]), table, column,
                                     vendor_id=pub["vendor_id"])
 
@@ -2371,7 +2413,7 @@ def get_public_detail_rows(key, token):
 
 @app.get("/api/r/<key>/<token>/export/<fmt>")
 def export_public_report(key, token, fmt):
-    if fmt not in ("pdf", "pptx"):
+    if fmt not in ("pdf", "pptx", "xlsx", "excel", "csv"):
         return jsonify(error="unknown export format"), 400
 
     pub = _resolve_pub(key, token)
@@ -2426,18 +2468,6 @@ def export_public_report(key, token, fmt):
         mime = "application/pdf"
         extension = "pdf"
 
-        # Frontend URL used by Playwright to render the published report.
-        #
-        # Local development:
-        #   Frontend = http://localhost:5173
-        #
-        # Production:
-        #   Frontend = https://nexdsupportal.in/analytics
-        #
-        # PUBLIC_BASE_URL should point to the FRONTEND, not the backend.
-        # This avoids relying on request.path because nginx strips
-        # /analytics before forwarding the request to Flask.
-
         frontend_base_url = os.environ.get(
             "PUBLIC_BASE_URL",
             "http://localhost:5173"
@@ -2448,6 +2478,19 @@ def export_public_report(key, token, fmt):
         print("PDF PUBLIC URL:", f"{frontend_base_url}/r/{key}/{token}")
 
         data = exporters.build_browser_pdf(public_url)
+
+    elif fmt in ("xlsx", "excel"):
+        mime = (
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        )
+        extension = "xlsx"
+        data = exporters.build_xlsx(name, sections)
+
+    elif fmt == "csv":
+        mime = "text/csv; charset=utf-8"
+        extension = "csv"
+        data = exporters.build_csv(name, sections)
 
     else:
         mime = (

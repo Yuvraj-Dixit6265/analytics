@@ -8,7 +8,7 @@ import { useStore } from "../store.jsx";
 import Chart, { Legend, legendItems } from "../charts/Chart.jsx";
 import {
   AGGS, BOX_KINDS, CHARTS, FMTS, colOptions, fmtCell, fmtNumber,
-  frameStyle, normS, styleObj, widthOptions, uid,
+  frameStyle, normS, styleObj, widthOptions, uid, cleanInvoiceNumber,
 } from "../model.js";
 import {
   Check, Chips, ConfirmBar, DeleteButton, Field, FormatPanel, FrameControls,
@@ -258,8 +258,8 @@ export function formatDetailHeading(title, value, fallback = "Details") {
   const rawTitle = String(title || "").trim();
   const rawVal = String(value || "").trim();
 
-  const cleanTitle = rawTitle.replace(/^[\s\-—–]+|[\s\-—–]+$/g, "").trim();
-  const cleanVal = rawVal.replace(/^[\s\-—–]+/, "").trim();
+  const cleanTitle = cleanInvoiceNumber(rawTitle.replace(/^[\s\-—–]+|[\s\-—–]+$/g, "").trim());
+  const cleanVal = cleanInvoiceNumber(rawVal.replace(/^[\s\-—–]+/, "").trim());
 
   const isGeneric =
     !cleanTitle ||
@@ -275,7 +275,7 @@ export function formatDetailHeading(title, value, fallback = "Details") {
     result = cleanTitle || cleanVal || fallback;
   }
 
-  return result.replace(/^[\s\-—–]+/, "").trim() || fallback;
+  return cleanInvoiceNumber(result.replace(/^[\s\-—–]+/, "").trim()) || fallback;
 }
 
 export function cleanHeading(str) {

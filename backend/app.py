@@ -796,6 +796,7 @@ def _clean_invoice_number(val):
         s = re.sub(r"^INV[\s_\-]*", "", s, flags=re.I)
         s = re.sub(r"[\s_\-]*20\d\d\s*$", "", s)
         s = re.sub(r"\s*_\s*", " ", s)
+        s = re.sub(r"\s+", " ", s)
         return s.strip()
     return val
 

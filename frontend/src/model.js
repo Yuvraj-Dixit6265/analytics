@@ -457,6 +457,7 @@ export function cleanInvoiceNumber(val) {
     let clean = s.replace(/^INV[\s_\-]*/i, "");
     clean = clean.replace(/[\s_\-]*20\d\d\s*$/i, "");
     clean = clean.replace(/\s*_\s*/g, " ");
+    clean = clean.replace(/\s+/g, " ");
     return clean.trim();
   }
   return val;

@@ -407,7 +407,7 @@ function Filter({ filter: f, index }) {
   const pending = state.pendingDel?.kind === "filter" && state.pendingDel.id === f.id;
   const design = state.mode === "design";
   const fst = normS(f.style), cst = normS(f.ctrlStyle);
-  const pos = f.labelPos || "top";
+  const pos = f.labelPos === "hidden" ? "hidden" : "left";
   const gap = f.gap === undefined || f.gap === "" ? 8 : Number(f.gap);
   const lw = String(f.labelWidth || "").trim();
   const cw = String(f.ctrlWidth || "").trim();
@@ -421,7 +421,7 @@ function Filter({ filter: f, index }) {
   };
 
   return (
-    <div className={`fchip w-${f.width || "auto"}${wide ? " w-wide" : ""}${selected ? " sel" : ""}${pos === "left" ? " has-pos-left" : ""}`}
+    <div className={`fchip w-${f.width || "auto"}${wide ? " w-wide" : ""}${selected ? " sel" : ""} has-pos-left`}
       style={fst.bg ? { background: fst.bg } : undefined}
       onMouseDown={(e) => {
         if (!design) return;
@@ -453,7 +453,7 @@ function Filter({ filter: f, index }) {
             style={labelStyle}
             onChange={(v) => set("label", v)}
           />
-          {f.colon && pos !== "hidden" && (
+          {pos !== "hidden" && f.label && (
             <span className="fcolon" style={{ marginLeft: "2px", ...styleObj(fst, { bg: true }) }}>:</span>
           )}
         </div>

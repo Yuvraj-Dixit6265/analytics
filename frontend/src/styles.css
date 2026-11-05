@@ -112,14 +112,55 @@ body.preview .ftools{display:none}
 .fname{white-space:nowrap}
 .fcolon{white-space:nowrap;margin-left:2px;margin-right:4px}
 .flabel-wrap{display:inline-flex;align-items:center;white-space:nowrap;flex:0 0 auto;gap:2px}
-.fbody{display:flex;gap:6px;min-width:0}
-.fbody.pos-top,.fbody.pos-hidden{flex-direction:column;gap:4px}
-.fbody.pos-left{flex-direction:row;align-items:center;flex-wrap:nowrap;gap:8px}
-.fbody.pos-right{flex-direction:row-reverse;align-items:center;flex-wrap:nowrap;justify-content:flex-end;gap:8px}
-.fbody.pos-left>.fname,.fbody.pos-right>.fname,.fbody.pos-left>.flabel-wrap,.fbody.pos-right>.flabel-wrap{flex:0 0 auto;max-width:none;white-space:nowrap}
-.fbody.pos-left>.fctrl,.fbody.pos-right>.fctrl{flex:1 1 auto;min-width:110px}
-.fchip.has-pos-left,.fchip:has(.pos-left){min-width:max-content !important;max-width:none !important;width:auto !important;justify-content:center}
-.public-pane .fchip.has-pos-left,.public-report .fchip.has-pos-left,.public-pane .fchip:has(.pos-left),.public-report .fchip:has(.pos-left){min-width:max-content !important;max-width:none !important;width:auto !important}
+.fbody {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+}
+.fbody.pos-top,
+.fbody.pos-left {
+  flex-direction: row !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+}
+.fbody.pos-right {
+  flex-direction: row-reverse !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  justify-content: flex-end !important;
+  gap: 8px !important;
+}
+.fbody.pos-hidden .flabel-wrap {
+  display: none !important;
+}
+.fbody > .fname,
+.fbody > .flabel-wrap {
+  flex: 0 0 auto !important;
+  max-width: none !important;
+  white-space: nowrap !important;
+  display: inline-flex !important;
+  align-items: center !important;
+}
+.fbody > .fctrl {
+  flex: 1 1 auto !important;
+  min-width: 110px !important;
+}
+.fchip {
+  min-width: max-content !important;
+  max-width: none !important;
+  width: auto !important;
+  justify-content: center !important;
+}
+.public-pane .fchip,
+.public-report .fchip {
+  min-width: max-content !important;
+  max-width: none !important;
+  width: auto !important;
+}
 .fbody>.fctrl{min-width:0}
 .lbl-hidden{opacity:.4;text-decoration:line-through}
 body.preview .lbl-hidden{display:none}

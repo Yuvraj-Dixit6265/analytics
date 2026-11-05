@@ -1079,7 +1079,7 @@ function PublicBoxBody({
                         </div>
                       ) : currentItems.length === 0 ? (
                         <div className="pr-empty" style={{ padding: "24px", textAlign: "center", color: "#64748B" }}>
-                          No line items found for this order.
+                          No line items found for this record.
                         </div>
                       ) : (
                         <div className="pr-items-card">
@@ -1097,7 +1097,11 @@ function PublicBoxBody({
                                 {currentItems.length} {currentItems.length === 1 ? "item" : "items"}
                               </span>
                             </div>
-                            {clickedValue ? <div className="pr-detail-po-tag">PO #{clickedValue}</div> : null}
+                            {clickedValue ? (
+                              <div className="pr-detail-po-tag">
+                                {(box?.src?.base || "").toLowerCase().includes("asn") ? "ASN #" : (box?.src?.base || "").toLowerCase().includes("gate") ? "Gate Entry #" : "PO #"}{clickedValue}
+                              </div>
+                            ) : null}
                           </div>
 
                           <div className="pr-items-table-wrap">

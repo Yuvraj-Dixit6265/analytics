@@ -2688,7 +2688,11 @@ if (box.tableMode === "graph") {
                 {(items || []).length} {(items || []).length === 1 ? "item" : "items"}
               </span>
             </div>
-            {poKey ? <div className="pr-detail-po-tag">PO #{poKey}</div> : null}
+            {poKey ? (
+              <div className="pr-detail-po-tag">
+                {(box?.src?.base || "").toLowerCase().includes("asn") ? "ASN #" : (box?.src?.base || "").toLowerCase().includes("gate") ? "Gate Entry #" : "PO #"}{poKey}
+              </div>
+            ) : null}
           </div>
 
           <div className="pr-items-table-wrap">

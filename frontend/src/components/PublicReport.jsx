@@ -580,6 +580,7 @@ function PublicBoxBody({
   const { state } = useStore();
 
   const [openDetails, setOpenDetails] = React.useState({});
+  const [openPoGroups, setOpenPoGroups] = React.useState({});
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
 
@@ -962,307 +963,460 @@ function PublicBoxBody({
             </td>
           </tr>
         )}
-        {filteredRows.map((row, rowIndex) => {
-          const rowDetailValue = clickable
-            ? row[clickable.col]
-            : null;
-          const clickedValue = rowDetailValue != null ? String(rowDetailValue) : "";
-          const isSelected = clickedValue !== "" && Boolean(openDetails[clickedValue]);
-          const currentDetail = clickedValue ? openDetails[clickedValue] : null;
-          const currentItems = currentDetail?.items || [];
-          const isCurrentLoading = currentDetail?.loading;
+        {(() => {
+          if (!filteredRows.length) return null;
 
-          const handleRowClick = async () => {
-            if (!clickable || rowDetailValue == null) return;
-            if (openDetails[clickedValue]) {
-              setOpenDetails((prev) => {
-                const next = { ...prev };
-                delete next[clickedValue];
-                return next;
-              });
-              return;
+          const isAsnReport = Boolean(
+            box?.table?.groupByPo === true ||
+            (box?.src?.base || "").toLowerCase() === "asns" ||
+            (box?.table?.title || box?.title || "").toLowerCase().includes("advance shipment") ||
+            (box?.table?.title || box?.title || "").toLowerCase().includes("asn")
+          );
+
+          const poCol = columns.find((col) => {
+            const txt = `${col.label || ""} ${col.col || ""}`.toLowerCase();
+            return (
+              txt.includes("po ") ||
+              txt.includes("po_") ||
+              txt.includes("purchase_order") ||
+              txt === "po" ||
+              txt.includes("ponumber") ||
+              txt.includes("po number") ||
+              txt === "po_id"
+            );
+          }) || (columns.length > 1 && (columns[0].label || columns[0].col || "").toLowerCase().includes("po") ? columns[0] : null);
+
+          const asnCol = columns.find((col) => {
+            const txt = `${col.label || ""} ${col.col || ""}`.toLowerCase();
+            return txt.includes("asn") || txt === "id" || txt.includes("shipment");
+          }) || (columns.length > 1 ? columns[1] : null);
+
+          const canGroupPo = isAsnReport && box?.table?.groupByPo !== false && Boolean(poCol);
+
+          const poGroups = [];
+          if (canGroupPo) {
+            const groupMap = new Map();
+            for (const r of filteredRows) {
+              const poVal = poCol ? (r[poCol.col] ?? r[poCol.col?.split(".").pop()]) : null;
+              const poKey = poVal != null && poVal !== "" ? String(poVal) : "__no_po__";
+              let group = groupMap.get(poKey);
+              if (!group) {
+                const vendorName =
+                  r["vendor_name"] ??
+                  r["vendor"] ??
+                  "";
+                group = {
+                  poKey,
+                  poVal,
+                  vendorName,
+                  rows: [],
+                };
+                groupMap.set(poKey, group);
+                poGroups.push(group);
+              }
+              group.rows.push(r);
             }
+          }
 
-            setOpenDetails((prev) => ({
-              ...prev,
-              [clickedValue]: { items: [], loading: true, error: "" },
-            }));
+          const renderDataRow = (row, rowIndex, isChildOfPo = false, childIdx = 0, poKey = "") => {
+            const targetKeyCol =
+              isChildOfPo && detail.keyColumn && String(detail.keyColumn) === String(poCol?.col)
+                ? asnCol || columns[1] || columns[0]
+                : detail.keyColumn
+                ? columns.find((col) => String(col.col) === String(detail.keyColumn))
+                : isChildOfPo
+                ? asnCol || columns[1] || columns[0]
+                : null;
 
-            try {
-              const params = new URLSearchParams({
-                parentTable: box?.src?.base || "",
-                lookupColumn: detail.keyColumn,
-                value: clickedValue,
-                detailColumns: (detail.columns || [])
-                  .map((col) => col.col)
-                  .filter(Boolean)
-                  .join(","),
-                limit: String(detail.limit || 100),
-              });
+            const isRowClickable = detail.enabled && Boolean(targetKeyCol);
+            const rowDetailValue = isRowClickable
+              ? row[targetKeyCol.col] ?? row[targetKeyCol.col?.split(".").pop()]
+              : null;
+            const clickedValue = rowDetailValue != null ? String(rowDetailValue) : "";
+            const isSelected = clickedValue !== "" && Boolean(openDetails[clickedValue]);
+            const currentDetail = clickedValue ? openDetails[clickedValue] : null;
+            const currentItems = currentDetail?.items || [];
+            const isCurrentLoading = currentDetail?.loading;
 
-              if (viewerToken) {
-                params.set("vt", viewerToken);
-              }
-              const detailUrl = `${API_BASE}/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`;
-              const res = await fetch(detailUrl, {
-                headers: getViewerHeaders(),
-              });
-
-              if (!res.ok) {
-                let errText = "Could not load detail rows";
-                try {
-                  const errJson = await res.json();
-                  if (errJson.error) errText = errJson.error;
-                } catch (_) {}
-                throw new Error(errText);
+            const handleRowClick = async () => {
+              if (!isRowClickable || rowDetailValue == null) return;
+              if (openDetails[clickedValue]) {
+                setOpenDetails((prev) => {
+                  const next = { ...prev };
+                  delete next[clickedValue];
+                  return next;
+                });
+                return;
               }
 
-              const data = await res.json();
               setOpenDetails((prev) => ({
                 ...prev,
-                [clickedValue]: { items: data.rows || [], loading: false, error: "" },
+                [clickedValue]: { items: [], loading: true, error: "" },
               }));
-            } catch (err) {
-              console.error("Could not load detail rows:", err);
-              setOpenDetails((prev) => ({
-                ...prev,
-                [clickedValue]: { items: [], loading: false, error: err.message },
-              }));
-            }
-          };
 
-          return (
-            <React.Fragment key={rowIndex}>
-              <tr
-                className={[
-                  clickable ? "clickable-row" : "",
-                  isSelected ? "selected-row" : "",
-                ].filter(Boolean).join(" ") || undefined}
-                style={clickable ? { cursor: "pointer" } : undefined}
-                onClick={clickable ? handleRowClick : undefined}
-              >
-                {columns.map((col, colIdx) => {
-                  const value =
-                    row[col.col] ??
-                    row[col.col?.split(".").pop()];
-                  const isKeyCol = clickable && (String(col.col) === String(detail.keyColumn) || colIdx === 0);
+              try {
+                const lookupCol =
+                  targetKeyCol?.col && targetKeyCol.col !== poCol?.col
+                    ? targetKeyCol.col
+                    : detail.keyColumn || "id";
 
-                  return (
-                    <td
-                      key={col.col}
-                      className={
-                        col.align === "right"
-                          ? "num"
-                          : undefined
-                      }
-                    >
-                      {isKeyCol ? (
-                        <span className="po-toggle-wrap">
-                          <span className="po-arrow-badge">{isSelected ? "▼" : "▶"}</span>
-                          <span className="po-link">{fmtCell(value, col.fmt, locale)}</span>
-                        </span>
-                      ) : (
-                        fmtCell(
-                          value,
-                          col.fmt,
-                          locale
-                        )
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
+                const params = new URLSearchParams({
+                  parentTable: box?.src?.base || "",
+                  lookupColumn: lookupCol,
+                  value: clickedValue,
+                  detailColumns: (detail.columns || [])
+                    .map((col) => col.col)
+                    .filter(Boolean)
+                    .join(","),
+                  limit: String(detail.limit || 100),
+                });
 
-              {isSelected && (
-                <tr className="pr-detail-row">
-                  <td colSpan={columns.length} className="pr-detail-cell">
-                    <div className="pr-detail-container">
-                      {isCurrentLoading ? (
-                        <div className="pr-detail-loading">
-                          <div className="pr-spinner" />
-                          <span>Loading line items...</span>
-                        </div>
-                      ) : currentDetail?.error ? (
-                        <div className="pr-detail-error" style={{ padding: "20px", textAlign: "center", color: "#b91c1c" }}>
-                          <p style={{ margin: "0 0 10px", fontWeight: 600 }}>{currentDetail.error}</p>
-                          <button
-                            type="button"
-                            onClick={() => window.location.reload()}
+                if (viewerToken) {
+                  params.set("vt", viewerToken);
+                }
+                const detailUrl = `${API_BASE}/r/${encodeURIComponent(publicKey)}/${encodeURIComponent(publicToken)}/detail?${params.toString()}`;
+                const res = await fetch(detailUrl, {
+                  headers: getViewerHeaders(),
+                });
+
+                if (!res.ok) {
+                  let errText = "Could not load detail rows";
+                  try {
+                    const errJson = await res.json();
+                    if (errJson.error) errText = errJson.error;
+                  } catch (_) {}
+                  throw new Error(errText);
+                }
+
+                const data = await res.json();
+                setOpenDetails((prev) => ({
+                  ...prev,
+                  [clickedValue]: { items: data.rows || [], loading: false, error: "" },
+                }));
+              } catch (err) {
+                console.error("Could not load detail rows:", err);
+                setOpenDetails((prev) => ({
+                  ...prev,
+                  [clickedValue]: { items: [], loading: false, error: err.message },
+                }));
+              }
+            };
+
+            const rowKey = isChildOfPo ? `pogroup-${poKey}-row-${childIdx}` : `row-${rowIndex}`;
+
+            return (
+              <React.Fragment key={rowKey}>
+                <tr
+                  className={[
+                    isChildOfPo ? "tree-child-row" : "",
+                    isRowClickable ? "clickable-row" : "",
+                    isSelected ? "selected-row" : "",
+                  ].filter(Boolean).join(" ") || undefined}
+                  style={isRowClickable ? { cursor: "pointer" } : undefined}
+                  onClick={isRowClickable ? handleRowClick : undefined}
+                >
+                  {columns.map((col, colIdx) => {
+                    const value =
+                      row[col.col] ??
+                      row[col.col?.split(".").pop()];
+                    const isPoCell = isChildOfPo && col === poCol;
+                    const isKeyCol =
+                      isRowClickable &&
+                      (col === targetKeyCol ||
+                        (!isChildOfPo &&
+                          (String(col.col) === String(detail.keyColumn) || colIdx === 0)));
+
+                    return (
+                      <td
+                        key={col.col}
+                        className={
+                          col.align === "right"
+                            ? "num"
+                            : undefined
+                        }
+                      >
+                        {isPoCell ? (
+                          <span
                             style={{
-                              padding: "6px 16px",
-                              borderRadius: "6px",
-                              background: "#2563EB",
-                              color: "#fff",
-                              border: "none",
-                              cursor: "pointer",
-                              fontSize: "13px"
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              paddingLeft: "14px",
+                              color: "#64748b",
                             }}
                           >
-                            Refresh Page
-                          </button>
-                        </div>
-                      ) : currentItems.length === 0 ? (
-                        <div className="pr-empty" style={{ padding: "24px", textAlign: "center", color: "#64748B" }}>
-                          No line items found for this record.
-                        </div>
-                      ) : (
-                        <div className="pr-items-card">
-                          <div className="pr-detail-card-header">
-                            <div className="pr-detail-title-pill">
-                              <span className="pr-detail-icon-box">
-                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                                  <line x1="12" y1="22.08" x2="12" y2="12" />
-                                </svg>
-                              </span>
-                              <span className="pr-detail-title-text">Line Items</span>
-                              <span className="pr-detail-count-badge">
-                                {currentItems.length} {currentItems.length === 1 ? "item" : "items"}
-                              </span>
-                            </div>
-                            {clickedValue ? (
-                              <div className="pr-detail-po-tag">
-                                {(box?.src?.base || "").toLowerCase().includes("asn") ? "ASN #" : (box?.src?.base || "").toLowerCase().includes("gate") ? "Gate Entry #" : "PO #"}{clickedValue}
-                              </div>
-                            ) : null}
+                            <span style={{ color: "#94a3b8", fontSize: "13px", fontWeight: 700 }}>
+                              ↳
+                            </span>
+                            <span
+                              style={{
+                                fontSize: "11px",
+                                background: "#f1f5f9",
+                                color: "#475569",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                                fontWeight: 600,
+                              }}
+                            >
+                              Shipment {childIdx + 1}
+                            </span>
+                          </span>
+                        ) : isKeyCol ? (
+                          <span className="po-toggle-wrap">
+                            <span className="po-arrow-badge">{isSelected ? "▼" : "▶"}</span>
+                            <span className="po-link">{fmtCell(value, col.fmt, locale)}</span>
+                          </span>
+                        ) : (
+                          fmtCell(
+                            value,
+                            col.fmt,
+                            locale
+                          )
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+
+                {isSelected && (
+                  <tr className="pr-detail-row">
+                    <td colSpan={columns.length} className="pr-detail-cell">
+                      <div className="pr-detail-container">
+                        {isCurrentLoading ? (
+                          <div className="pr-detail-loading">
+                            <div className="pr-spinner" />
+                            <span>Loading line items...</span>
                           </div>
+                        ) : currentDetail?.error ? (
+                          <div className="pr-detail-error" style={{ padding: "20px", textAlign: "center", color: "#b91c1c" }}>
+                            <p style={{ margin: "0 0 10px", fontWeight: 600 }}>{currentDetail.error}</p>
+                            <button
+                              type="button"
+                              onClick={() => window.location.reload()}
+                              style={{
+                                padding: "6px 16px",
+                                borderRadius: "6px",
+                                background: "#2563EB",
+                                color: "#fff",
+                                border: "none",
+                                cursor: "pointer",
+                                fontSize: "13px"
+                              }}
+                            >
+                              Refresh Page
+                            </button>
+                          </div>
+                        ) : currentItems.length === 0 ? (
+                          <div className="pr-empty" style={{ padding: "24px", textAlign: "center", color: "#64748B" }}>
+                            No line items found for this record.
+                          </div>
+                        ) : (
+                          <div className="pr-items-card">
+                            <div className="pr-detail-card-header">
+                              <div className="pr-detail-title-pill">
+                                <span className="pr-detail-icon-box">
+                                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                                    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                                    <line x1="12" y1="22.08" x2="12" y2="12" />
+                                  </svg>
+                                </span>
+                                <span className="pr-detail-title-text">Line Items</span>
+                                <span className="pr-detail-count-badge">
+                                  {currentItems.length} {currentItems.length === 1 ? "item" : "items"}
+                                </span>
+                              </div>
+                              {clickedValue ? (
+                                <div className="pr-detail-po-tag">
+                                  {(box?.src?.base || "").toLowerCase().includes("asn") ? "ASN #" : (box?.src?.base || "").toLowerCase().includes("gate") ? "Gate Entry #" : "PO #"}{clickedValue}
+                                </div>
+                              ) : null}
+                            </div>
 
-                          <div className="pr-items-table-wrap">
-                            <table className="rt pr-items-table">
-                              <thead>
-                                <tr>
-                                  {(detail.columns || [])
-                                    .filter(
-                                      (col) => col.col
-                                    )
-                                    .map((col) => (
-                                      <th
-                                        key={col.col}
-                                        className={col.align === "right" ? "num" : undefined}
-                                      >
-                                        {cleanHeading(col.label || col.col)}
-                                      </th>
-                                    ))}
-                                </tr>
-                              </thead>
-
-                              <tbody>
-                                {currentItems.map(
-                                  (
-                                    item,
-                                    itemIndex
-                                  ) => (
-                                    <tr
-                                      key={
-                                        itemIndex
-                                      }
-                                    >
-                                      {(detail.columns || [])
-                                        .filter(
-                                          (col) =>
-                                            col.col
-                                        )
-                                        .map(
-                                          (col) => {
-                                            const value =
-                                              item[
-                                              col.col
-                                              ] ??
-                                              item[
-                                              col.col
-                                                ?.split(
-                                                  "."
-                                                )
-                                                .pop()
-                                              ];
-
-                                            return (
-                                              <td
-                                                key={
-                                                  col.col
-                                                }
-                                                className={
-                                                  col.align === "right"
-                                                    ? "num"
-                                                    : undefined
-                                                }
-                                              >
-                                                {fmtCell(
-                                                  value,
-                                                  col.fmt,
-                                                  locale
-                                                ) || "-"}
-                                              </td>
-                                            );
-                                          }
-                                        )}
-                                    </tr>
-                                  )
-                                )}
-                              </tbody>
-                              {currentItems.length > 0 && (
-                                <tfoot>
+                            <div className="pr-items-table-wrap">
+                              <table className="rt pr-items-table">
+                                <thead>
                                   <tr>
                                     {(detail.columns || [])
-                                      .filter((col) => col.col)
-                                      .map((col, i) => {
-                                        const values = currentItems.map(
-                                          (item) => item[col.col] ?? item[col.col?.split(".").pop()]
-                                        );
-                                        const numericValues = values.filter(
-                                          (val) => typeof val === "number" || (typeof val === "string" && val.trim() !== "" && !isNaN(val) && !isNaN(parseFloat(val)))
-                                        );
-                                        const isNumCol = col.align === "right" || (numericValues.length > 0 && numericValues.length === values.filter((val) => val != null && val !== "").length);
-                                        const colKey = String(col.col || "").toLowerCase();
-                                        const colLbl = String(col.label || "").toLowerCase();
-                                        const isIdOrCode = /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colKey) || /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colLbl);
-                                        const canSum = isNumCol && !isIdOrCode;
-                                        const allCurrency = values.length > 0 && values.every((val) => val === "INR" || val === "USD" || val === "EUR");
-
-                                        return (
-                                          <td
-                                            key={col.col}
-                                            className={col.align === "right" || isNumCol ? "num" : undefined}
-                                          >
-                                            {i === 0 ? (
-                                              <span className="pr-total-badge">
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}>
-                                                  <polyline points="20 6 9 17 4 12" />
-                                                </svg>
-                                                Total
-                                              </span>
-                                            ) : canSum ? (
-                                              fmtCell(
-                                                currentItems.reduce(
-                                                  (a, item) => a + (Number(item[col.col] ?? item[col.col?.split(".").pop()]) || 0),
-                                                  0
-                                                ),
-                                                col.fmt || "number",
-                                                locale
-                                              )
-                                            ) : allCurrency ? (
-                                              values[0]
-                                            ) : (
-                                              ""
-                                            )}
-                                          </td>
-                                        );
-                                      })}
+                                      .filter(
+                                        (col) => col.col
+                                      )
+                                      .map((col) => (
+                                        <th
+                                          key={col.col}
+                                          className={col.align === "right" ? "num" : undefined}
+                                        >
+                                          {cleanHeading(col.label || col.col)}
+                                        </th>
+                                      ))}
                                   </tr>
-                                </tfoot>
-                              )}
-                            </table>
+                                </thead>
+
+                                <tbody>
+                                  {currentItems.map(
+                                    (
+                                      item,
+                                      itemIndex
+                                    ) => (
+                                      <tr
+                                        key={
+                                          itemIndex
+                                        }
+                                      >
+                                        {(detail.columns || [])
+                                          .filter(
+                                            (col) =>
+                                              col.col
+                                          )
+                                          .map(
+                                            (col) => {
+                                              const value =
+                                                item[
+                                                col.col
+                                                ] ??
+                                                item[
+                                                col.col
+                                                  ?.split(
+                                                    "."
+                                                  )
+                                                  .pop()
+                                                ];
+
+                                              return (
+                                                <td
+                                                  key={col.col}
+                                                  className={col.align === "right" ? "num" : undefined}
+                                                >
+                                                  {fmtCell(
+                                                    value,
+                                                    col.fmt,
+                                                    locale
+                                                  )}
+                                                </td>
+                                              );
+                                            }
+                                          )}
+                                      </tr>
+                                    )
+                                  )}
+                                </tbody>
+
+                                {(detail.columns || []).some((col) => {
+                                  const values = currentItems.map((item) => item[col.col] ?? item[col.col?.split(".").pop()]);
+                                  const numericValues = values.filter((val) => typeof val === "number" || (typeof val === "string" && val.trim() !== "" && !isNaN(val) && !isNaN(parseFloat(val))));
+                                  const colKey = String(col.col || "").toLowerCase();
+                                  const colLbl = String(col.label || "").toLowerCase();
+                                  const isIdOrCode = /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colKey) || /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colLbl);
+                                  return (col.align === "right" || numericValues.length > 0) && !isIdOrCode;
+                                }) && (
+                                  <tfoot>
+                                    <tr className="pr-detail-total-row">
+                                      {(detail.columns || [])
+                                        .filter((col) => col.col)
+                                        .map((col, i) => {
+                                          const values = currentItems.map(
+                                            (item) => item[col.col] ?? item[col.col?.split(".").pop()]
+                                          );
+                                          const numericValues = values.filter(
+                                            (val) => typeof val === "number" || (typeof val === "string" && val.trim() !== "" && !isNaN(val) && !isNaN(parseFloat(val)))
+                                          );
+                                          const isNumCol = col.align === "right" || (numericValues.length > 0 && numericValues.length === values.filter((val) => val != null && val !== "").length);
+                                          const colKey = String(col.col || "").toLowerCase();
+                                          const colLbl = String(col.label || "").toLowerCase();
+                                          const isIdOrCode = /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colKey) || /(_id|^id$|code|number|num$|hsn|item_no)/i.test(colLbl);
+                                          const canSum = isNumCol && !isIdOrCode;
+                                          const allCurrency = values.length > 0 && values.every((val) => val === "INR" || val === "USD" || val === "EUR");
+
+                                          return (
+                                            <td
+                                              key={col.col}
+                                              className={col.align === "right" || isNumCol ? "num" : undefined}
+                                            >
+                                              {i === 0 ? (
+                                                <span className="pr-total-badge">
+                                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: 4 }}>
+                                                    <polyline points="20 6 9 17 4 12" />
+                                                  </svg>
+                                                  Total
+                                                </span>
+                                              ) : canSum ? (
+                                                fmtCell(
+                                                  currentItems.reduce(
+                                                    (a, item) => a + (Number(item[col.col] ?? item[col.col?.split(".").pop()]) || 0),
+                                                    0
+                                                  ),
+                                                  col.fmt || "number",
+                                                  locale
+                                                )
+                                              ) : allCurrency ? (
+                                                values[0]
+                                              ) : (
+                                                ""
+                                              )}
+                                            </td>
+                                          );
+                                        })}
+                                    </tr>
+                                  </tfoot>
+                                )}
+                              </table>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </React.Fragment>
-          );
-        })}
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          };
+
+          if (canGroupPo) {
+            return poGroups.map((group) => {
+              const isPoOpen = openPoGroups[group.poKey] !== false;
+              return (
+                <React.Fragment key={`pogroup-${group.poKey}`}>
+                  <tr
+                    className="tree-po-header-row"
+                    onClick={() => {
+                      setOpenPoGroups((prev) => ({
+                        ...prev,
+                        [group.poKey]: prev[group.poKey] === false ? true : false,
+                      }));
+                    }}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <td colSpan={columns.length}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px" }}>
+                        <span className={`tree-po-toggle-badge ${isPoOpen ? "expanded" : "collapsed"}`}>
+                          {isPoOpen ? "▼" : "▶"}
+                        </span>
+                        <span style={{ fontWeight: 700, color: "#0f172a", fontSize: "14px", letterSpacing: "0.2px" }}>
+                          PO # {group.poVal ?? "N/A"}
+                        </span>
+                        <span className="tree-po-badge">
+                          {group.rows.length} {group.rows.length === 1 ? "Shipment (ASN)" : "Shipments (ASNs)"}
+                        </span>
+                        {group.vendorName ? (
+                          <span style={{ fontSize: "12px", color: "#64748b", marginLeft: "auto" }}>
+                            Vendor: <strong style={{ color: "#1e293b" }}>{group.vendorName}</strong>
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+
+                  {isPoOpen &&
+                    group.rows.map((row, childIdx) =>
+                      renderDataRow(row, childIdx, true, childIdx, group.poKey)
+                    )}
+                </React.Fragment>
+              );
+            });
+          }
+
+          return filteredRows.map((row, rowIndex) => renderDataRow(row, rowIndex, false));
+        })()}
       </tbody>
       {filteredRows.length > 0 && (
         <tfoot>

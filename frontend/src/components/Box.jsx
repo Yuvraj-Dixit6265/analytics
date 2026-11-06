@@ -814,6 +814,7 @@ function Body({ box }) {
   const [detailRow, setDetailRow] = React.useState(null);
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [openDetails, setOpenDetails] = React.useState({});
+  const [openPoGroups, setOpenPoGroups] = React.useState({});
   const [reportSearchTerm, setReportSearchTerm] = React.useState("");
   const [reportPage, setReportPage] = React.useState(1);
   const [selectedReportRecord, setSelectedReportRecord] = React.useState(null);
@@ -2909,26 +2910,80 @@ if (box.tableMode === "graph") {
 
       <tbody>
   {filteredRows.length ? (
-    (window.location.pathname.includes("/r/") || !c.limit || c.limit === 0 ? filteredRows : filteredRows.slice(0, c.limit)).map((r, i) => {
+    (() => {
+
+    const isAsnReport = Boolean(
+      c.groupByPo === true ||
+      (box?.src?.base || "").toLowerCase() === "asns" ||
+      (c.title || box?.title || "").toLowerCase().includes("advance shipment") ||
+      (c.title || box?.title || "").toLowerCase().includes("asn")
+    );
+
+    const poCol = shown.find((col) => {
+      const txt = `${col.label || ""} ${col.col || ""}`.toLowerCase();
+      return (
+        txt.includes("po ") ||
+        txt.includes("po_") ||
+        txt.includes("purchase_order") ||
+        txt === "po" ||
+        txt.includes("ponumber") ||
+        txt.includes("po number") ||
+        txt === "po_id"
+      );
+    }) || (shown.length > 1 && (shown[0].label || shown[0].col || "").toLowerCase().includes("po") ? shown[0] : null);
+
+    const asnCol = shown.find((col) => {
+      const txt = `${col.label || ""} ${col.col || ""}`.toLowerCase();
+      return txt.includes("asn") || txt === "id" || txt.includes("shipment");
+    }) || (shown.length > 1 ? shown[1] : null);
+
+    const canGroupPo = isAsnReport && c.groupByPo !== false && Boolean(poCol);
+
+    const displayRows =
+      window.location.pathname.includes("/r/") || !c.limit || c.limit === 0
+        ? filteredRows
+        : filteredRows.slice(0, c.limit);
+
+    const poGroups = [];
+    if (canGroupPo) {
+      const groupMap = new Map();
+      for (const r of displayRows) {
+        const poVal = poCol ? (r[alias(poCol.col)] ?? r[poCol.col]) : null;
+        const poKey = poVal != null && poVal !== "" ? String(poVal) : "__no_po__";
+        let group = groupMap.get(poKey);
+        if (!group) {
+          const vendorName =
+            r[alias("vendor_name")] ||
+            r["vendor_name"] ||
+            r[alias("vendor")] ||
+            r["vendor"] ||
+            "";
+          group = {
+            poKey,
+            poVal,
+            vendorName,
+            rows: [],
+          };
+          groupMap.set(poKey, group);
+          poGroups.push(group);
+        }
+        group.rows.push(r);
+      }
+    }
+
+    const renderDataRow = (r, i, isChildOfPo = false, childIdx = 0, poKey = "") => {
       const detail = c.detail || {};
-      console.log("DETAIL USED:", {
-        baseTable: box?.src?.base || "",
-        keyColumn: detail.keyColumn,
-        detailColumns: (detail.columns || []).map((x) => x.col),
-      });
-      console.log("FULL TABLE CONFIG:", JSON.stringify(c, null, 2));
+      const targetKeyCol =
+        isChildOfPo && detail.keyColumn && String(detail.keyColumn) === String(poCol?.col)
+          ? asnCol || shown[1] || shown[0]
+          : detail.keyColumn
+          ? shown.find((col) => String(col.col) === String(detail.keyColumn))
+          : isChildOfPo
+          ? asnCol || shown[1] || shown[0]
+          : null;
 
-      const clickable =
-        detail.enabled &&
-        detail.keyColumn &&
-        shown.find(
-          (col) => String(col.col) === String(detail.keyColumn)
-        );
-
-      const rowDetailValue = clickable
-        ? r[alias(clickable.col)]
-        : null;
-
+      const clickable = detail.enabled && Boolean(targetKeyCol);
+      const rowDetailValue = clickable ? r[alias(targetKeyCol.col)] : null;
       const clickedValue = rowDetailValue != null ? String(rowDetailValue) : "";
       const isSelected = popupMode
         ? rowDetailValue != null && String(detailValue) === String(rowDetailValue) && detailItems !== null
@@ -2939,6 +2994,11 @@ if (box.tableMode === "graph") {
 
       const handleRowClick = async () => {
         if (!clickable || rowDetailValue == null) return;
+        const lookupCol =
+          targetKeyCol?.col && targetKeyCol.col !== poCol?.col
+            ? targetKeyCol.col
+            : detail.keyColumn || "id";
+
         if (popupMode) {
           if (isSelected) {
             setDetailItems(null);
@@ -2960,7 +3020,7 @@ if (box.tableMode === "graph") {
 
               const params = new URLSearchParams({
                 parentTable: box?.src?.base || "",
-                lookupColumn: detail.keyColumn,
+                lookupColumn: lookupCol,
                 value: clickedValue,
                 detailColumns: (detail.columns || [])
                   .map((col) => col.col)
@@ -2984,7 +3044,7 @@ if (box.tableMode === "graph") {
               data = await api.getDetailRows(
                 state.processKey,
                 box?.src?.base || "",
-                detail.keyColumn,
+                lookupCol,
                 clickedValue,
                 (detail.columns || [])
                   .map((col) => col.col)
@@ -3003,7 +3063,7 @@ if (box.tableMode === "graph") {
           return;
         }
 
-        // Inline accordion mode: multiple items can stay open simultaneously
+        // Inline accordion mode
         if (openDetails[clickedValue]) {
           setOpenDetails((prev) => {
             const next = { ...prev };
@@ -3027,7 +3087,7 @@ if (box.tableMode === "graph") {
 
             const params = new URLSearchParams({
               parentTable: box?.src?.base || "",
-              lookupColumn: detail.keyColumn,
+              lookupColumn: lookupCol,
               value: clickedValue,
               detailColumns: (detail.columns || [])
                 .map((col) => col.col)
@@ -3051,7 +3111,7 @@ if (box.tableMode === "graph") {
             data = await api.getDetailRows(
               state.processKey,
               box?.src?.base || "",
-              detail.keyColumn,
+              lookupCol,
               clickedValue,
               (detail.columns || [])
                 .map((col) => col.col)
@@ -3073,11 +3133,14 @@ if (box.tableMode === "graph") {
         }
       };
 
+      const rowKey = isChildOfPo ? `pogroup-${poKey}-row-${childIdx}` : `row-${i}`;
+
       return (
-        <React.Fragment key={i}>
+        <React.Fragment key={rowKey}>
           <tr
             className={[
-              c.zebra && i % 2 ? "z" : "",
+              c.zebra && (isChildOfPo ? childIdx : i) % 2 ? "z" : "",
+              isChildOfPo ? "tree-child-row" : "",
               clickable ? "clickable-row" : "",
               isSelected ? "selected-row" : "",
             ].filter(Boolean).join(" ") || undefined}
@@ -3086,21 +3149,46 @@ if (box.tableMode === "graph") {
           >
             {shown.map((col, colIdx) => {
               const value = r[alias(col.col)];
-              const isKeyCol = clickable && (String(col.col) === String(detail.keyColumn) || colIdx === 0);
+              const isPoCell = isChildOfPo && col === poCol;
+              const isKeyCol =
+                clickable &&
+                (col === targetKeyCol ||
+                  (!isChildOfPo &&
+                    (String(col.col) === String(detail.keyColumn) || colIdx === 0)));
 
               return (
                 <td
                   key={col.col}
-                  className={
-                    col.align === "right" ? "num" : undefined
-                  }
-                  style={
-                    col.align === "center"
-                      ? { textAlign: "center" }
-                      : undefined
-                  }
+                  className={col.align === "right" ? "num" : undefined}
+                  style={col.align === "center" ? { textAlign: "center" } : undefined}
                 >
-                  {isKeyCol ? (
+                  {isPoCell ? (
+                    <span
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        paddingLeft: "14px",
+                        color: "#64748b",
+                      }}
+                    >
+                      <span style={{ color: "#94a3b8", fontSize: "13px", fontWeight: 700 }}>
+                        ↳
+                      </span>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          background: "#f1f5f9",
+                          color: "#475569",
+                          padding: "1px 6px",
+                          borderRadius: "4px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Shipment {childIdx + 1}
+                      </span>
+                    </span>
+                  ) : isKeyCol ? (
                     <span className="po-toggle-wrap">
                       <span className="po-arrow">{isSelected ? "▼" : "▶"}</span>
                       <span className="po-link">{fmtCell(value, col.fmt, locale)}</span>
@@ -3124,7 +3212,54 @@ if (box.tableMode === "graph") {
           )}
         </React.Fragment>
       );
-    })
+    };
+
+    if (canGroupPo) {
+      return poGroups.map((group) => {
+        const isPoOpen = openPoGroups[group.poKey] !== false;
+        return (
+          <React.Fragment key={`pogroup-${group.poKey}`}>
+            <tr
+              className="tree-po-header-row"
+              onClick={() => {
+                setOpenPoGroups((prev) => ({
+                  ...prev,
+                  [group.poKey]: prev[group.poKey] === false ? true : false,
+                }));
+              }}
+              style={{ cursor: "pointer" }}
+            >
+              <td colSpan={shown.length}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", fontSize: "13px" }}>
+                  <span className={`tree-po-toggle-badge ${isPoOpen ? "expanded" : "collapsed"}`}>
+                    {isPoOpen ? "▼" : "▶"}
+                  </span>
+                  <span style={{ fontWeight: 700, color: "#0f172a", fontSize: "14px", letterSpacing: "0.2px" }}>
+                    PO # {group.poVal ?? "N/A"}
+                  </span>
+                  <span className="tree-po-badge">
+                    {group.rows.length} {group.rows.length === 1 ? "Shipment (ASN)" : "Shipments (ASNs)"}
+                  </span>
+                  {group.vendorName ? (
+                    <span style={{ fontSize: "12px", color: "#64748b", marginLeft: "auto" }}>
+                      Vendor: <strong style={{ color: "#1e293b" }}>{group.vendorName}</strong>
+                    </span>
+                  ) : null}
+                </div>
+              </td>
+            </tr>
+
+            {isPoOpen &&
+              group.rows.map((r, childIdx) =>
+                renderDataRow(r, childIdx, true, childIdx, group.poKey)
+              )}
+          </React.Fragment>
+        );
+      });
+    }
+
+    return displayRows.map((r, i) => renderDataRow(r, i, false));
+  })()
   ) : rows.length > 0 ? (
     <tr className="empty-search-row">
       <td colSpan={shown.length}>
@@ -5212,7 +5347,17 @@ const addAllColumns = () => {
         Add columns, connect them to database fields, rename their headings,
         or leave a column blank.
       </Hint>
-              <Group>Row Detail List</Group>
+      <Group>Shipment Tree Grouping</Group>
+      <Switch
+        on={c.groupByPo !== false}
+        label="Group shipments by PO (Tree view)"
+        onChange={(v) => set("table.groupByPo", v)}
+      />
+      <Hint>
+        Automatically organizes shipments into a collapsible tree under their Purchase Order so PO numbers do not repeat.
+      </Hint>
+
+      <Group>Row Detail List</Group>
 
       <Switch
         on={c.detail?.enabled === true}

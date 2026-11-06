@@ -1184,7 +1184,7 @@ def _build_detail_query(
             required_tables.add(node)
             node = parent_edge[node][0]
 
-    # Join required nodes in BFS order, using the same tree for every column.
+    # Join required nodes in BFS order, using LEFT JOIN so missing auxiliary tables don't wipe out existing items.
     join_parts = []
     for table in sorted(
         required_tables - {parent_table},
@@ -1192,7 +1192,7 @@ def _build_detail_query(
     ):
         left, left_col, right, right_col = parent_edge[table]
         join_parts.append(
-            f"INNER JOIN `{right}` "
+            f"LEFT JOIN `{right}` "
             f"ON `{left}`.`{left_col}` = `{right}`.`{right_col}`"
         )
 
@@ -1272,7 +1272,11 @@ def get_detail_rows(key):
             cur.execute(sql, (value, limit))
             rows = cur.fetchall()
 
-        return jsonify(rows=db.clean(rows))
+        cleaned = [
+            r for r in db.clean(rows)
+            if any(r.get(c) is not None for c in requested_columns)
+        ]
+        return jsonify(rows=cleaned)
 
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
@@ -2449,7 +2453,11 @@ def get_public_detail_rows(key, token):
             cur.execute(sql, (value,) + vendor_params + (limit,))
             rows = cur.fetchall()
 
-        return jsonify(rows=db.clean(rows))
+        cleaned = [
+            r for r in db.clean(rows)
+            if any(r.get(c) is not None for c in requested_columns)
+        ]
+        return jsonify(rows=cleaned)
 
     except ValueError as exc:
         return jsonify(error=str(exc)), 400

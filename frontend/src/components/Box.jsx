@@ -2732,7 +2732,7 @@ if (box.tableMode === "graph") {
                               value,
                               col.fmt,
                               locale
-                            )}
+                            ) || "-"}
                           </td>
                         );
                       })}

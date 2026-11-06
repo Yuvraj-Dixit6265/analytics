@@ -464,13 +464,14 @@ export function cleanInvoiceNumber(val) {
 }
 
 export function fmtCell(v, fmt, locale) {
-  if (v === null || v === undefined || v === "") return "";
+  if (v === null || v === undefined || (typeof v === "string" && v.trim() === "")) return "-";
   v = cleanInvoiceNumber(v);
+  if (v === null || v === undefined || (typeof v === "string" && v.trim() === "")) return "-";
   switch (fmt) {
     case "number": return fmtNumber(v, 0, locale);
     case "currency": return "₹" + fmtNumber(v, 0, locale);
     case "percent": return fmtNumber(v, 1, locale) + "%";
-    case "date": return fmtDate(v);
+    case "date": return fmtDate(v) || "-";
     case "text": return String(v);
     default:
       if (typeof v === "number") {
@@ -483,10 +484,11 @@ export function fmtCell(v, fmt, locale) {
           /^(?:[A-Za-z]{3},\s*)?\d{1,2}\s+[A-Za-z]{3}\s+\d{4}/.test(v) ||
           /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}:\d{2})?(?:\.000Z)?$/.test(v)
         ) {
-          return fmtDate(v);
+          return fmtDate(v) || "-";
         }
       }
-      return String(v);
+      const s = String(v).trim();
+      return s === "" ? "-" : s;
   }
 }
 

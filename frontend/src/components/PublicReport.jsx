@@ -1192,7 +1192,7 @@ function PublicBoxBody({
                                                   value,
                                                   col.fmt,
                                                   locale
-                                                )}
+                                                ) || "-"}
                                               </td>
                                             );
                                           }

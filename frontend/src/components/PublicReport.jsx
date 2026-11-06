@@ -525,17 +525,11 @@ function PublicBox({
   publicKey,
   publicToken,
 }) {
-  let span = Math.max(1, Math.min(cols, box.span || 1));
-  if (box.kind === "value" && span < Math.floor(cols / 2) && cols >= 4) {
-    span = Math.floor(cols / 2);
-  }
-
-  const cls = ["box", `box-${box.kind}`];
-  if (box.frame?.on) cls.push("framed");
+  const span = Math.max(1, Math.min(cols, box.span || 1));
 
   return (
     <div
-      className={cls.join(" ")}
+      className={`box${box.frame?.on ? " framed" : ""}`}
       style={{
         gridColumn: `span ${span}`,
         ...(box.style?.bg
@@ -548,20 +542,15 @@ function PublicBox({
       }}
     >
       {box.titleVisible !== false && (
-        <span className="box-title-container">
-          <div
-            className="box-title"
-            style={styleObj(normS(box.titleStyle))}
-          >
-            {box.title}
-          </div>
-          {box.kind === "value" && !String(box.title || "").trim().endsWith(":") && (
-            <span className="box-kpi-colon">:</span>
-          )}
-        </span>
+        <div
+          className="box-title"
+          style={styleObj(normS(box.titleStyle))}
+        >
+          {box.title}
+        </div>
       )}
 
-      <div className={box.kind === "value" ? "box-value-body" : undefined} style={styleObj(box.style, { bg: true, align: true })}>
+      <div style={styleObj(box.style, { bg: true, align: true })}>
         <PublicBoxBody
           box={box}
           publicKey={publicKey}

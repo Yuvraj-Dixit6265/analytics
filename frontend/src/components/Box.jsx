@@ -68,18 +68,16 @@ export default function Box({ box, cols }) {
   const selected = !isPublic && state.sel?.kind === "box" && state.sel.id === box.id;
   const pending = !isPublic && state.pendingDel?.kind === "box" && state.pendingDel.id === box.id;
   const design = state.mode === "design" && !isPublic;
-  let span = Math.max(1, Math.min(cols, box.span || 1));
-  if (box.kind === "value" && span < Math.floor(cols / 2) && cols >= 4) {
-    span = Math.floor(cols / 2);
-  }
+  const span = Math.max(1, Math.min(cols, box.span || 1));
 
   const set = (path, value) =>
     dispatch({ type: "set", target: "box", id: box.id, path, value });
 
-  const cls = ["box", `box-${box.kind}`];
+  const cls = ["box"];
   if (box.frame?.on) cls.push("framed");
   if (box.visible === false) cls.push("boxoff");
   if (selected) cls.push("sel");
+  if (pending) cls.push("pending");
 
   return (
     <div
@@ -99,24 +97,13 @@ export default function Box({ box, cols }) {
       {selected && design && <Toolbar box={box} />}
 
       {box.titleVisible !== false && (
-        <span className="box-title-container">
-          {design ? (
-            <Editable className="box-title" value={box.title} placeholder="Unnamed box"
-              style={styleObj(normS(box.titleStyle))}
-              editable={design}
-              onChange={(v) => set("title", v)} />
-          ) : (
-            <div className="box-title" style={styleObj(normS(box.titleStyle))}>
-              {box.title}
-            </div>
-          )}
-          {box.kind === "value" && !String(box.title || "").trim().endsWith(":") && (
-            <span className="box-kpi-colon">:</span>
-          )}
-        </span>
+        <Editable className="box-title" value={box.title} placeholder="Unnamed box"
+          style={styleObj(normS(box.titleStyle))}
+          editable={design}
+          onChange={(v) => set("title", v)} />
       )}
 
-      <div className={box.kind === "value" ? "box-value-body" : undefined} style={styleObj(box.style, { bg: true, align: true })}>
+      <div style={styleObj(box.style, { bg: true, align: true })}>
         <Body box={box} />
       </div>
 

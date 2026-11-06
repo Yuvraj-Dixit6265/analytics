@@ -1009,7 +1009,12 @@ function PublicBoxBody({
               });
 
               if (!res.ok) {
-                throw new Error("Could not load detail rows");
+                let errText = "Could not load detail rows";
+                try {
+                  const errJson = await res.json();
+                  if (errJson.error) errText = errJson.error;
+                } catch (_) {}
+                throw new Error(errText);
               }
 
               const data = await res.json();
@@ -1076,6 +1081,25 @@ function PublicBoxBody({
                         <div className="pr-detail-loading">
                           <div className="pr-spinner" />
                           <span>Loading line items...</span>
+                        </div>
+                      ) : currentDetail?.error ? (
+                        <div className="pr-detail-error" style={{ padding: "20px", textAlign: "center", color: "#b91c1c" }}>
+                          <p style={{ margin: "0 0 10px", fontWeight: 600 }}>{currentDetail.error}</p>
+                          <button
+                            type="button"
+                            onClick={() => window.location.reload()}
+                            style={{
+                              padding: "6px 16px",
+                              borderRadius: "6px",
+                              background: "#2563EB",
+                              color: "#fff",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: "13px"
+                            }}
+                          >
+                            Refresh Page
+                          </button>
                         </div>
                       ) : currentItems.length === 0 ? (
                         <div className="pr-empty" style={{ padding: "24px", textAlign: "center", color: "#64748B" }}>

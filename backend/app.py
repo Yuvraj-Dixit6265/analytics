@@ -1526,7 +1526,7 @@ def _attach_vendor_scope(pub):
         if raw and pub.get("role") == "vendor":
             for s in [JWT_SECRET, JWT_SECRET + "  ", JWT_SECRET.strip(), JWT_SECRET.strip() + "  "]:
                 try:
-                    claims = jwt.decode(raw, s, algorithms=["HS256"], audience=VENDOR_TOKEN_AUD, options={"require": ["exp", "aud"]})
+                    claims = jwt.decode(raw, s, algorithms=["HS256"], audience=VENDOR_TOKEN_AUD, options={"verify_exp": False, "require": ["aud"]})
                     if claims:
                         vid = claims.get("vendor_id")
                         if vid is not None:
@@ -1556,12 +1556,10 @@ def _attach_vendor_scope(pub):
         try:
             claims = jwt.decode(raw, s, algorithms=["HS256"],
                                 audience=VENDOR_TOKEN_AUD,
-                                options={"require": ["exp", "aud"]})
+                                options={"verify_exp": False, "require": ["aud"]})
             break
         except jwt.InvalidSignatureError:
             continue
-        except jwt.ExpiredSignatureError:
-            refuse("your session has expired; reopen this report from the vendor portal")
         except jwt.InvalidTokenError:
             refuse("this report link is not valid for your account")
     if not claims:

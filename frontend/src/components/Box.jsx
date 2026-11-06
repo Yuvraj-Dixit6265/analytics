@@ -802,6 +802,7 @@ function Body({ box }) {
   const [detailLoading, setDetailLoading] = React.useState(false);
   const [openDetails, setOpenDetails] = React.useState({});
   const [openPoGroups, setOpenPoGroups] = React.useState({});
+  const [tableSearch, setTableSearch] = React.useState("");
   const [reportSearchTerm, setReportSearchTerm] = React.useState("");
   const [reportPage, setReportPage] = React.useState(1);
   const [selectedReportRecord, setSelectedReportRecord] = React.useState(null);
@@ -2584,7 +2585,6 @@ if (box.tableMode === "graph") {
     );
 
   const rows = result?.rows || [];
-  const [tableSearch, setTableSearch] = React.useState("");
   const effectiveSearch = (tableSearch || state.searchTerm || "").trim().toLowerCase();
   const [msg, sub] = stateNote(box, state.catalog);
   const alias = (ref) => ref.replace(/\./g, "__");
@@ -2592,27 +2592,26 @@ if (box.tableMode === "graph") {
   /* The clicked row's details open in a popup (turn off in Row Detail List). */
   const detail = c.detail || {};
 
-  const filteredRows = React.useMemo(() => {
-    if (!effectiveSearch) return rows;
-    return rows.filter((r) => {
-      const matchCol = shown.some((col) => {
-        const val = r[alias(col.col)] ?? r[col.col];
-        return String(val ?? "").toLowerCase().includes(effectiveSearch);
-      });
-      if (matchCol) return true;
+  const filteredRows = !effectiveSearch
+    ? rows
+    : rows.filter((r) => {
+        const matchCol = shown.some((col) => {
+          const val = r[alias(col.col)] ?? r[col.col];
+          return String(val ?? "").toLowerCase().includes(effectiveSearch);
+        });
+        if (matchCol) return true;
 
-      const detailKey = detail?.keyColumn ? r[alias(detail.keyColumn)] ?? r[detail.keyColumn] : null;
-      if (detailKey != null && openDetails[String(detailKey)]?.items) {
-        const items = openDetails[String(detailKey)].items;
-        return items.some((item) =>
-          Object.values(item).some((val) =>
-            String(val ?? "").toLowerCase().includes(effectiveSearch)
-          )
-        );
-      }
-      return false;
-    });
-  }, [rows, effectiveSearch, shown, openDetails, detail?.keyColumn]);
+        const detailKey = detail?.keyColumn ? r[alias(detail.keyColumn)] ?? r[detail.keyColumn] : null;
+        if (detailKey != null && openDetails[String(detailKey)]?.items) {
+          const items = openDetails[String(detailKey)].items;
+          return items.some((item) =>
+            Object.values(item).some((val) =>
+              String(val ?? "").toLowerCase().includes(effectiveSearch)
+            )
+          );
+        }
+        return false;
+      });
 
   const popupMode = detail.popup !== false;
   const closeDetail = () => {

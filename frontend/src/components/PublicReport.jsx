@@ -570,6 +570,7 @@ function PublicBoxBody({
 
   const [openDetails, setOpenDetails] = React.useState({});
   const [openPoGroups, setOpenPoGroups] = React.useState({});
+  const [tableSearch, setTableSearch] = React.useState("");
   const result = state.results[box.id];
   const locale = state.doc.numberFormat;
 
@@ -851,7 +852,6 @@ function PublicBoxBody({
   const rows = result?.rows || [];
   const detail = box.table?.detail || {};
 
-  const [tableSearch, setTableSearch] = React.useState("");
   const effectiveSearch = (tableSearch || state.searchTerm || "").trim().toLowerCase();
 
   const clickable =
@@ -862,27 +862,26 @@ function PublicBoxBody({
         String(col.col) === String(detail.keyColumn)
     );
 
-  const filteredRows = React.useMemo(() => {
-    if (!effectiveSearch) return rows;
-    return rows.filter((r) => {
-      const matchCol = columns.some((col) => {
-        const val = r[col.col] ?? r[col.col?.split(".").pop()];
-        return String(val ?? "").toLowerCase().includes(effectiveSearch);
-      });
-      if (matchCol) return true;
+  const filteredRows = !effectiveSearch
+    ? rows
+    : rows.filter((r) => {
+        const matchCol = columns.some((col) => {
+          const val = r[col.col] ?? r[col.col?.split(".").pop()];
+          return String(val ?? "").toLowerCase().includes(effectiveSearch);
+        });
+        if (matchCol) return true;
 
-      const rowDetailValue = clickable ? r[clickable.col] : null;
-      if (rowDetailValue != null && openDetails[String(rowDetailValue)]?.items) {
-        const items = openDetails[String(rowDetailValue)].items;
-        return items.some((item) =>
-          Object.values(item).some((val) =>
-            String(val ?? "").toLowerCase().includes(effectiveSearch)
-          )
-        );
-      }
-      return false;
-    });
-  }, [rows, effectiveSearch, columns, openDetails, clickable]);
+        const rowDetailValue = clickable ? r[clickable.col] : null;
+        if (rowDetailValue != null && openDetails[String(rowDetailValue)]?.items) {
+          const items = openDetails[String(rowDetailValue)].items;
+          return items.some((item) =>
+            Object.values(item).some((val) =>
+              String(val ?? "").toLowerCase().includes(effectiveSearch)
+            )
+          );
+        }
+        return false;
+      });
 
   if (!columns.length) {
     return (

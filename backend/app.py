@@ -1783,6 +1783,53 @@ def _vendor_report_compatible(definition, catalogue):
         return False
 
     return all(box_compatible(box) for box in boxes)
+
+
+def _vendor_report_sequence(name):
+    """Return priority for vendor reports sequence:
+      1. Purchase order
+      2. Advance Shipment Notification
+      3. Gate Entry
+      4. Material Inward
+      5. Stock
+      6. Vendor Invoices
+      7. Vendor Payments
+      100+. Any new or other reports published after these.
+    """
+    n = (name or "").strip().lower()
+    n_clean = re.sub(r"[^a-z0-9 ]+", " ", n)
+
+    # 1. Purchase order
+    if "purchase order" in n_clean or n_clean == "po" or "purchase_order" in n:
+        return 1
+
+    # 2. Advance Shipment Notification / ASN
+    if "advance shipment" in n_clean or "shipment notification" in n_clean or "asn" in n_clean:
+        return 2
+
+    # 3. Gate Entry
+    if "gate entry" in n_clean or "gate_entry" in n or "gate pass" in n_clean:
+        return 3
+
+    # 4. Material Inward (matches Material Inward, Material List, Goods Receipt, etc.)
+    if "material inward" in n_clean or "material list" in n_clean or "material_inward" in n or "goods receipt" in n_clean or "grn" in n_clean:
+        return 4
+
+    # 5. Stock
+    if "stock" in n_clean or "inventory" in n_clean:
+        return 5
+
+    # 6. Vendor Invoices
+    if "invoice" in n_clean:
+        return 6
+
+    # 7. Vendor Payments
+    if "payment" in n_clean:
+        return 7
+
+    return 100
+
+
 @app.get("/api/processes/published")
 @auth()
 def list_published():
@@ -1844,12 +1891,24 @@ def list_published():
                 app.logger.info("Report %s (%s) excluded from vendor dashboard (not compatible)", r["name"], r["process_key"])
                 continue
 
+        updated_ts = r["updated_at"].timestamp() if hasattr(r.get("updated_at"), "timestamp") else 0
         reports.append({
             "key": r["process_key"],
             "name": r["name"],
-            "updatedAt": r["updated_at"],
+            # For vendor dashboard: do not reflect date on cards
+            "updatedAt": None if role == "vendor" else r["updated_at"],
             "url": f"/analytics/r/{r['process_key']}/{r['token']}",
+            "_priority": _vendor_report_sequence(r["name"]) if role == "vendor" else 0,
+            "_updated_ts": updated_ts,
         })
+
+    if role == "vendor":
+        # Sort by canonical sequence first, then newer reports first
+        reports.sort(key=lambda x: (x["_priority"], -x["_updated_ts"]))
+
+    for rep in reports:
+        rep.pop("_priority", None)
+        rep.pop("_updated_ts", None)
 
     return jsonify(reports=reports)
 

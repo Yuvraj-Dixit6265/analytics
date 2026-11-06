@@ -1204,7 +1204,7 @@ def _build_detail_query(
         )
 
     sql = (
-        f"SELECT {', '.join(select_parts)} "
+        f"SELECT DISTINCT {', '.join(select_parts)} "
         f"FROM `{parent_table}` "
         f"{' '.join(join_parts)} "
         f"WHERE `{parent_table}`.`{lookup_column}` = %s "

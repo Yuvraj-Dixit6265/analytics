@@ -656,7 +656,8 @@ def build(box, filters, state, catalogue, role_row=None, force=None):
         where.append(cond[0])
         params.extend(cond[1])
 
-    sql = "SELECT " + ",\n       ".join(select) + f"\nFROM   {_quote(scope.base)}"
+    distinct_clause = "DISTINCT " if (src.get("distinct") or (kind in ("table", "reportView") and isinstance(cfg, dict) and cfg.get("distinct"))) else ""
+    sql = f"SELECT {distinct_clause}" + ",\n       ".join(select) + f"\nFROM   {_quote(scope.base)}"
     for j in join_sql:
         sql += "\n" + j
     if where:

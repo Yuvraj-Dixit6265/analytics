@@ -1,13 +1,46 @@
 name: Deploy
 
+# main -> GCP production (vms.ankitgroup.com), plus legacy AWS nexdsupportal.in until cutover
+# dev  -> GCP development (dev.vms.ankitgroup.com)
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+  workflow_dispatch:
+
+# One deploy per branch at a time; a second push queues behind the first instead of racing it.
+concurrency:
+  group: nexd-analytics-deploy-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  deploy:
+  gcp:
+    name: GCP ${{ github.ref_name == 'main' && 'production (vms.ankitgroup.com)' || 'development (dev.vms.ankitgroup.com)' }}
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
+      - name: Package source
+        # Only tracked files (fresh checkout); node_modules is rebuilt on the server.
+        run: tar --exclude=./.git --exclude=node_modules -czf "$RUNNER_TEMP/src.tgz" .
+
+      - name: Upload and deploy
+        env:
+          SSH_KEY: ${{ github.ref_name == 'main' && secrets.GCP_PROD_SSH_KEY || secrets.GCP_DEV_SSH_KEY }}
+          HOST: ${{ github.ref_name == 'main' && secrets.GCP_PROD_HOST || secrets.GCP_DEV_HOST }}
+          KNOWN_HOSTS: ${{ secrets.GCP_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/gcp && chmod 600 ~/.ssh/gcp
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          O="-o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -i $HOME/.ssh/gcp"
+          # deploy user may only run supp-deploy (see /usr/local/sbin/supp-deploy on the server)
+          scp $O "$RUNNER_TEMP/src.tgz" deploy@$HOST:incoming/nexd-analytics.tgz
+          ssh $O deploy@$HOST 'sudo /usr/local/sbin/supp-deploy nexd-analytics'
+
+  aequm:
+    name: AWS nexdsupportal.in (legacy)
+    if: github.ref_name == 'main'
+    runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH
         env:
@@ -17,35 +50,7 @@ jobs:
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key ubuntu@$SERVER_HOST '
-            cd ~/aqqum/analytics &&
-            git fetch origin main &&
-            git reset --hard origin/main &&
-            cd backend &&
-            source .venv/bin/activate &&
-            pip install -r requirements.txt &&
-            python -m playwright install chromium &&
-            python migrate_publications.py &&
-            deactivate &&
-            cd ../frontend &&
-            npm install &&
-            VITE_BASE_PATH=/analytics/ VITE_API_BASE=/analytics/api npm run build &&
-            chmod -R o+rX dist &&
-            sudo systemctl restart nexd-analytics
-          '
-
-      # Second environment (aequmindia.online), running alongside the one above until it's
-      # phased in fully.
-      - name: Deploy to second server over SSH
-        env:
-          SSH_KEY: ${{ secrets.SERVER_SSH_KEY_2 }}
-          SERVER_HOST: ${{ secrets.SERVER_HOST_2 }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key_2
-          chmod 600 ~/.ssh/deploy_key_2
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key_2 ubuntu@$SERVER_HOST '
             cd ~/aqqum/analytics &&
             git fetch origin main &&
             git reset --hard origin/main &&

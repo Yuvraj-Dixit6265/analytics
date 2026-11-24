@@ -1,7 +1,7 @@
 name: Deploy
 
-# main -> GCP production (vms.ankitgroup.com), plus legacy AWS nexdsupportal.in until cutover
-# dev  -> GCP development (dev.vms.ankitgroup.com)
+# main -> GCP production (vms.ankitgroup.com)
+# dev  -> GCP development (dev.vms.ankitgroup.com) and AWS nexdsupportal.in (also a dev server)
 on:
   push:
     branches: [main, dev]
@@ -38,8 +38,8 @@ jobs:
           ssh $O deploy@$HOST 'sudo /usr/local/sbin/supp-deploy nexd-analytics'
 
   aequm:
-    name: AWS nexdsupportal.in (legacy)
-    if: github.ref_name == 'main'
+    name: AWS nexdsupportal.in (dev)
+    if: github.ref_name == 'dev'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy over SSH
@@ -52,8 +52,8 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key ubuntu@$SERVER_HOST '
             cd ~/aqqum/analytics &&
-            git fetch origin main &&
-            git reset --hard origin/main &&
+            git fetch origin dev &&
+            git checkout -f -B dev origin/dev &&
             cd backend &&
             source .venv/bin/activate &&
             pip install -r requirements.txt &&
